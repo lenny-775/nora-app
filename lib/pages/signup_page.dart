@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'other_profile_page.dart'; // NOUVEAU : On importe la page de profil
+import 'other_profile_page.dart'; 
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -48,6 +48,9 @@ class _SignupPageState extends State<SignupPage> {
 
   // --- LOGIQUE NAVIGATION ---
   void _nextPage() {
+    // Fermer le clavier avant de changer de page pour éviter les bugs visuels
+    FocusScope.of(context).unfocus();
+
     if (_currentPage == 0) {
       if (_firstNameController.text.isEmpty || _emailController.text.isEmpty || _passwordController.text.isEmpty || _ageController.text.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tout remplir svp !')));
@@ -67,6 +70,7 @@ class _SignupPageState extends State<SignupPage> {
   }
 
   void _previousPage() {
+    FocusScope.of(context).unfocus(); // Fermer le clavier
     _pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
     setState(() => _currentPage--);
   }
@@ -126,7 +130,7 @@ class _SignupPageState extends State<SignupPage> {
             .select()
             .eq('city', _selectedCity!)
             .neq('id', user.id)
-            .limit(10); // J'ai monté la limite à 10 pour avoir du choix
+            .limit(10); 
 
         setState(() {
           _similarProfiles = List<Map<String, dynamic>>.from(profiles);
@@ -153,179 +157,180 @@ class _SignupPageState extends State<SignupPage> {
     );
   }
 
+  // --- ÉTAPE 1 : AVEC SCROLL ---
   Widget _buildStep1() {
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text("Qui es-tu ?", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF2D3436))),
-          const SizedBox(height: 10),
-          const Text("Dis-nous en un peu plus sur toi", style: TextStyle(color: Colors.grey)),
-          const SizedBox(height: 30),
-          TextField(controller: _firstNameController, decoration: _inputDecor("Ton Prénom", Icons.person)),
-          const SizedBox(height: 16),
-          TextField(controller: _ageController, keyboardType: TextInputType.number, decoration: _inputDecor("Ton Âge", Icons.cake)),
-          const SizedBox(height: 16),
-          TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: _inputDecor("Email", Icons.email)),
-          const SizedBox(height: 16),
-          TextField(controller: _passwordController, obscureText: true, decoration: _inputDecor("Mot de passe", Icons.lock)),
-        ],
+    return Center( // Centre le contenu si le clavier est fermé
+      child: SingleChildScrollView( // Autorise le scroll si le clavier est ouvert
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text("Qui es-tu ?", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF2D3436))),
+            const SizedBox(height: 10),
+            const Text("Dis-nous en un peu plus sur toi", style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 30),
+            TextField(controller: _firstNameController, decoration: _inputDecor("Ton Prénom", Icons.person)),
+            const SizedBox(height: 16),
+            TextField(controller: _ageController, keyboardType: TextInputType.number, decoration: _inputDecor("Ton Âge", Icons.cake)),
+            const SizedBox(height: 16),
+            TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: _inputDecor("Email", Icons.email)),
+            const SizedBox(height: 16),
+            TextField(controller: _passwordController, obscureText: true, decoration: _inputDecor("Mot de passe", Icons.lock)),
+            // Petit espace en bas pour être sûr qu'on peut scroller jusqu'au bout
+            const SizedBox(height: 20),
+          ],
+        ),
       ),
     );
   }
 
+  // --- ÉTAPE 2 : AVEC SCROLL ---
   Widget _buildStep2() {
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text("Ton Aventure", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF2D3436))),
-          const SizedBox(height: 10),
-          const Text("Où en es-tu au Canada ?", style: TextStyle(color: Colors.grey)),
-          const SizedBox(height: 30),
-          DropdownButtonFormField<String>(value: _selectedCity, decoration: _inputDecor("Ta ville actuelle", Icons.location_city), items: _cities.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) => setState(() => _selectedCity = v)),
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(value: _selectedStatus, decoration: _inputDecor("Ton statut", Icons.badge), items: _statusOptions.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) => setState(() => _selectedStatus = v)),
-          const SizedBox(height: 16),
-          DropdownButtonFormField<String>(value: _selectedGoal, decoration: _inputDecor("Je cherche surtout à...", Icons.search), items: _goals.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) => setState(() => _selectedGoal = v)),
-          const SizedBox(height: 16),
-          TextField(controller: _dateController, readOnly: true, onTap: _selectDate, decoration: _inputDecor("Date d'arrivée", Icons.calendar_today)),
-        ],
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Text("Ton Aventure", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF2D3436))),
+            const SizedBox(height: 10),
+            const Text("Où en es-tu au Canada ?", style: TextStyle(color: Colors.grey)),
+            const SizedBox(height: 30),
+            DropdownButtonFormField<String>(value: _selectedCity, decoration: _inputDecor("Ta ville actuelle", Icons.location_city), items: _cities.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) => setState(() => _selectedCity = v)),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(value: _selectedStatus, decoration: _inputDecor("Ton statut", Icons.badge), items: _statusOptions.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) => setState(() => _selectedStatus = v)),
+            const SizedBox(height: 16),
+            DropdownButtonFormField<String>(value: _selectedGoal, decoration: _inputDecor("Je cherche surtout à...", Icons.search), items: _goals.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(), onChanged: (v) => setState(() => _selectedGoal = v)),
+            const SizedBox(height: 16),
+            TextField(controller: _dateController, readOnly: true, onTap: _selectDate, decoration: _inputDecor("Date d'arrivée", Icons.calendar_today)),
+            const SizedBox(height: 20),
+          ],
+        ),
       ),
     );
   }
 
-  // --- PAGE 3 : SUGGESTIONS (MODIFIÉE) ---
+  // --- ÉTAPE 3 : SUGGESTIONS (INCHANGÉE MAIS NETTOYÉE) ---
   Widget _buildStep3() {
-    return Padding(
-      padding: const EdgeInsets.all(24.0),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.check_circle, size: 80, color: Colors.green),
-          const SizedBox(height: 20),
-          const Text("Compte créé !", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          Text("Voici des PVTistes à $_selectedCity qui pourraient t'intéresser :", textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
-          const SizedBox(height: 30),
+    return Center( // On centre aussi pour la cohérence
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.check_circle, size: 80, color: Colors.green),
+            const SizedBox(height: 20),
+            const Text("Compte créé !", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 10),
+            Text("Voici des PVTistes à $_selectedCity qui pourraient t'intéresser :", textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 30),
 
-          if (_similarProfiles.isEmpty)
-            const Text("Tu es le premier ici ! 🎉")
-          else
-            SizedBox(
-              height: 150, // Un peu plus haut pour le confort
-              child: ListView.builder(
-                scrollDirection: Axis.horizontal,
-                itemCount: _similarProfiles.length,
-                itemBuilder: (context, index) {
-                  final p = _similarProfiles[index];
-                  // --- C'EST ICI QU'ON REND CLIQUABLE ---
-                  return GestureDetector(
-                    onTap: () {
-                      // Ouvre la page du profil
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => OtherProfilePage(userId: p['id']),
+            if (_similarProfiles.isEmpty)
+              const Text("Tu es le premier ici ! 🎉")
+            else
+              SizedBox(
+                height: 150,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _similarProfiles.length,
+                  itemBuilder: (context, index) {
+                    final p = _similarProfiles[index];
+                    return GestureDetector(
+                      onTap: () {
+                        Navigator.push(context, MaterialPageRoute(builder: (context) => OtherProfilePage(userId: p['id'])));
+                      },
+                      child: Container(
+                        width: 110,
+                        margin: const EdgeInsets.only(right: 15),
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)], border: Border.all(color: Colors.grey.shade200)),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            CircleAvatar(radius: 30, backgroundImage: NetworkImage(p['avatar_url'] ?? '')),
+                            const SizedBox(height: 8),
+                            Text(p['first_name'], style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                            Text(p['status'] ?? '', style: const TextStyle(fontSize: 10, color: Colors.grey), textAlign: TextAlign.center),
+                            const SizedBox(height: 4),
+                            const Icon(Icons.arrow_forward, size: 14, color: Color(0xFFFF6B00))
+                          ],
                         ),
-                      );
-                    },
-                    child: Container(
-                      width: 110,
-                      margin: const EdgeInsets.only(right: 15),
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(15),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 5)],
-                        border: Border.all(color: Colors.grey.shade200)
                       ),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          CircleAvatar(
-                            radius: 30, 
-                            backgroundImage: NetworkImage(p['avatar_url'] ?? ''),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(p['first_name'], style: const TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-                          Text(p['status'] ?? '', style: const TextStyle(fontSize: 10, color: Colors.grey), textAlign: TextAlign.center),
-                          const SizedBox(height: 4),
-                          const Icon(Icons.arrow_forward, size: 14, color: Color(0xFFFF6B00)) // Petit indicateur visuel
-                        ],
-                      ),
-                    ),
-                  );
-                },
+                    );
+                  },
+                ),
+              ),
+            
+            const SizedBox(height: 40), // Espace pour le bouton
+            SizedBox(
+              width: double.infinity,
+              height: 55,
+              child: ElevatedButton(
+                onPressed: () => Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false),
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D3436), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                child: const Text("Commencer l'aventure", style: TextStyle(fontSize: 18, color: Colors.white)),
               ),
             ),
-            
-          const Spacer(),
-          SizedBox(
-            width: double.infinity,
-            height: 55,
-            child: ElevatedButton(
-              onPressed: () => Navigator.pushNamedAndRemoveUntil(context, '/home', (r) => false),
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D3436), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-              child: const Text("Commencer l'aventure", style: TextStyle(fontSize: 18, color: Colors.white)),
-            ),
-          ),
-          const SizedBox(height: 20),
-        ],
+          ],
+        ),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
+    // ASTUCE : GestureDetector ici ferme le clavier si on clique n'importe où ailleurs
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
         backgroundColor: Colors.white,
-        elevation: 0,
-        leading: _currentPage > 0 
-          ? IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black), onPressed: _previousPage)
-          : IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black), onPressed: () => Navigator.pop(context)),
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(3, (index) => Container(
-            margin: const EdgeInsets.symmetric(horizontal: 4),
-            width: 10, height: 10,
-            decoration: BoxDecoration(shape: BoxShape.circle, color: _currentPage == index ? const Color(0xFFFF6B00) : Colors.grey.shade300),
-          )),
+        resizeToAvoidBottomInset: true, // IMPORTANT : L'écran se redimensionne quand le clavier sort
+        appBar: AppBar(
+          backgroundColor: Colors.white,
+          elevation: 0,
+          leading: _currentPage > 0 
+            ? IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black), onPressed: _previousPage)
+            : IconButton(icon: const Icon(Icons.arrow_back, color: Colors.black), onPressed: () => Navigator.pop(context)),
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(3, (index) => Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              width: 10, height: 10,
+              decoration: BoxDecoration(shape: BoxShape.circle, color: _currentPage == index ? const Color(0xFFFF6B00) : Colors.grey.shade300),
+            )),
+          ),
+          centerTitle: true,
         ),
-        centerTitle: true,
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: PageView(
-                controller: _pageController,
-                physics: const NeverScrollableScrollPhysics(),
-                children: [
-                  _buildStep1(),
-                  _buildStep2(),
-                  _buildStep3(),
-                ],
-              ),
-            ),
-            if (_currentPage < 2)
-              Padding(
-                padding: const EdgeInsets.all(24.0),
-                child: Container(
-                  width: double.infinity, height: 55,
-                  decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF6B00), Color(0xFFFF0055)]), borderRadius: BorderRadius.circular(16)),
-                  child: ElevatedButton(
-                    onPressed: _isLoading ? null : _nextPage,
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
-                    child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : Text(_currentPage == 0 ? "Suivant" : "Valider mon profil", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                  ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              Expanded(
+                child: PageView(
+                  controller: _pageController,
+                  physics: const NeverScrollableScrollPhysics(),
+                  children: [
+                    _buildStep1(),
+                    _buildStep2(),
+                    _buildStep3(),
+                  ],
                 ),
               ),
-          ],
+              // Bouton Suivant (sauf dernière page)
+              if (_currentPage < 2)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24), // Un peu de padding
+                  child: Container(
+                    width: double.infinity, height: 55,
+                    decoration: BoxDecoration(gradient: const LinearGradient(colors: [Color(0xFFFF6B00), Color(0xFFFF0055)]), borderRadius: BorderRadius.circular(16)),
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _nextPage,
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.transparent, shadowColor: Colors.transparent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16))),
+                      child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : Text(_currentPage == 0 ? "Suivant" : "Valider mon profil", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

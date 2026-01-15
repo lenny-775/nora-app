@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'components.dart'; // Import des composants
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -38,89 +39,55 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.black),
-          onPressed: () => Navigator.pop(context),
-        ),
-      ),
+      backgroundColor: const Color(0xFFFFF8F5), // Fond crème
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 30.0),
+          padding: const EdgeInsets.all(30.0),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Bouton Retour simple
+              IconButton(
+                icon: const Icon(Icons.arrow_back),
+                padding: EdgeInsets.zero,
+                alignment: Alignment.centerLeft,
+                onPressed: () => Navigator.pop(context),
+              ),
+              const SizedBox(height: 30),
+
               const Text(
-                'Bon retour !',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF2D3436)),
+                "Bon retour !",
+                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFF2D3436)),
               ),
               const SizedBox(height: 10),
-              const Text(
-                'Connecte-toi pour retrouver la communauté.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
+              Text(
+                "Connecte-toi pour retrouver tes potes.",
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 50),
 
-              // Champ Email
-              TextField(
+              // Champs Stylisés
+              NoraTextField(
                 controller: _emailController,
-                decoration: InputDecoration(
-                  labelText: 'Email',
-                  prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFFFF6B00)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-                  filled: true,
-                  fillColor: Colors.grey.shade100,
-                ),
-                keyboardType: TextInputType.emailAddress,
+                hintText: "Ton email",
+                icon: Icons.email_outlined,
+              ),
+              NoraTextField(
+                controller: _passwordController,
+                hintText: "Ton mot de passe",
+                icon: Icons.lock_outline,
+                obscureText: true,
+              ),
+
+              const Spacer(),
+
+              // Bouton Principal
+              NoraButton(
+                text: "Se connecter",
+                isLoading: _isLoading,
+                onPressed: _signIn,
               ),
               const SizedBox(height: 20),
-
-              // Champ Mot de passe
-              TextField(
-                controller: _passwordController,
-                obscureText: true,
-                decoration: InputDecoration(
-                  labelText: 'Mot de passe',
-                  prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFFFF6B00)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-                  filled: true,
-                  fillColor: Colors.grey.shade100,
-                ),
-              ),
-              const SizedBox(height: 40),
-
-              // Bouton Se connecter (Dégradé)
-              Container(
-                height: 55,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFFFF6B00), Color(0xFFFF0055)],
-                    begin: Alignment.centerLeft,
-                    end: Alignment.centerRight,
-                  ),
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [
-                    BoxShadow(color: const Color(0xFFFF0055).withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 4)),
-                  ],
-                ),
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _signIn,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.transparent,
-                    shadowColor: Colors.transparent,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  ),
-                  child: _isLoading 
-                    ? const CircularProgressIndicator(color: Colors.white) 
-                    : const Text('Se connecter', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                ),
-              ),
             ],
           ),
         ),

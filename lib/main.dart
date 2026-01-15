@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-// AJOUT ICI : Import pour les langues
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'pages/welcome_page.dart';
 import 'pages/login_page.dart';
 import 'pages/signup_page.dart';
 import 'pages/home_page.dart';
+import 'pages/splash_screen.dart'; // AJOUT : Import du Splash Screen
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,37 +29,28 @@ class NoraApp extends StatelessWidget {
       title: 'NORA',
       debugShowCheckedModeBanner: false,
       
-      // --- DÉBUT CONFIGURATION LANGUE ---
-      // On autorise le Français et l'Anglais
+      // --- CONFIGURATION LANGUE ---
       supportedLocales: const [
         Locale('fr', 'FR'), 
         Locale('en', 'US'),
       ],
-      // On charge les outils de traduction de Flutter
       localizationsDelegates: const [
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      // --- FIN CONFIGURATION LANGUE ---
+      
+      // --- CHANGEMENT ICI : On démarre sur le Splash Screen ---
+      home: const SplashScreen(),
 
-      home: const AuthGate(),
+      // --- ROUTES ---
+      // Le Splash Screen utilise ces noms pour naviguer
       routes: {
-        '/login': (context) => LoginPage(),
-        '/signup': (context) => SignupPage(),
-        '/home': (context) => HomePage(),
+        '/welcome': (context) => const WelcomePage(),
+        '/login': (context) => const LoginPage(), // J'ai ajouté const pour optimiser
+        '/signup': (context) => const SignupPage(),
+        '/home': (context) => const HomePage(),
       },
     );
-  }
-}
-
-class AuthGate extends StatelessWidget {
-  const AuthGate({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final session = Supabase.instance.client.auth.currentSession;
-    if (session != null) return HomePage();
-    return WelcomePage();
   }
 }

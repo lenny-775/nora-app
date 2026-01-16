@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'package:flutter/material.dart';
 import 'components.dart';
 
@@ -9,40 +8,8 @@ class WelcomePage extends StatefulWidget {
   State<WelcomePage> createState() => _WelcomePageState();
 }
 
-class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _animation;
-  bool _showPin = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(seconds: 3),
-      vsync: this,
-    );
-
-    _animation = Tween<double>(begin: 0, end: 2 * pi).animate(
-      CurvedAnimation(parent: _controller, curve: Curves.easeInOutBack),
-    );
-
-    _controller.addListener(() {
-      if (_controller.value >= 0.5 && !_showPin) {
-        if (mounted) setState(() => _showPin = true);
-      } else if (_controller.value < 0.5 && _showPin) {
-        if (mounted) setState(() => _showPin = false);
-      }
-    });
-
-    _controller.repeat(reverse: true);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
+class _WelcomePageState extends State<WelcomePage> {
+  
   final TextStyle _logoTextStyle = const TextStyle(
     fontSize: 50,
     fontWeight: FontWeight.bold,
@@ -53,8 +20,7 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
 
   @override
   Widget build(BuildContext context) {
-    // Espacement serré
-    const double gapSize = 2.0; 
+    const double gapSize = 5.0; 
 
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8F5),
@@ -75,49 +41,12 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
                     Text('N', style: _logoTextStyle),
                     const SizedBox(width: gapSize), 
                     
-                    // LA CAGE DU O / PIN
-                    SizedBox(
-                      width: 50, 
-                      height: 60,
-                      child: Center(
-                        child: AnimatedBuilder(
-                          animation: _animation,
-                          builder: (context, child) {
-                            final angle = _animation.value;
-                            return Transform(
-                              transform: Matrix4.identity()..setEntry(3, 2, 0.001)..rotateY(angle),
-                              alignment: Alignment.center,
-                              child: _showPin 
-                                // ON REVIENT AUX ICÔNES FLUTTER
-                                ? Transform(
-                                    alignment: Alignment.center,
-                                    transform: Matrix4.identity()..rotateY(pi),
-                                    // "Sandwich" d'icônes
-                                    child: Stack(
-                                      alignment: Alignment.center,
-                                      children: [
-                                        // Le Pin dégradé
-                                        ShaderMask(
-                                          shaderCallback: (bounds) => const LinearGradient(
-                                            colors: [Color(0xFFFF0055), Color(0xFFFF6B00)],
-                                            begin: Alignment.bottomCenter,
-                                            end: Alignment.topCenter,
-                                          ).createShader(bounds),
-                                          child: const Icon(Icons.location_on, size: 55, color: Colors.white),
-                                        ),
-                                        // La petite feuille (standard pour l'instant)
-                                        const Positioned(
-                                          top: 10,
-                                          child: Icon(Icons.eco, size: 18, color: Colors.white), 
-                                        ),
-                                      ],
-                                    ),
-                                  )
-                                : Text('O', style: _logoTextStyle),
-                            );
-                          },
-                        ),
-                      ),
+                    // --- LE LOGO ARRIVE ICI ET COMMENCE À TOURNER ---
+                    const Hero(
+                      tag: 'nora-logo-hero',
+                      // Ici on ne met pas isAnimating: false, donc par défaut c'est true !
+                      // Il va se mettre à tourner dès qu'il arrive.
+                      child: NoraPin3D(size: 50), 
                     ),
                     
                     const SizedBox(width: gapSize), 
@@ -129,10 +58,18 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
               ),
               
               const SizedBox(height: 20),
-              Text(
-                "La communauté des PVTistes\nau Canada",
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 16, color: Colors.grey.shade600, height: 1.5),
+              
+              TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.0, end: 1.0),
+                duration: const Duration(seconds: 2),
+                builder: (context, value, child) {
+                  return Opacity(opacity: value, child: child);
+                },
+                child: Text(
+                  "La communauté des PVTistes\nau Canada",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 16, color: Colors.grey.shade600, height: 1.5),
+                ),
               ),
 
               const Spacer(),

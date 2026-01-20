@@ -35,7 +35,7 @@ class _SignupPageState extends State<SignupPage> {
     '🍻 Boire des verres', '📍 Découvrir la ville', '🎨 Juste curieux'
   ];
 
-  // --- NOUVELLE FONCTION : POP-UP STYLÉE ---
+  // --- POP-UP STYLÉE ---
   void _showErrorDialog(String title, String message) {
     showDialog(
       context: context,
@@ -113,7 +113,7 @@ class _SignupPageState extends State<SignupPage> {
     );
   }
 
-  // --- NAVIGATION (MODIFIÉE POUR VÉRIFIER LE MDP) ---
+  // --- NAVIGATION ---
   void _nextPage() {
     FocusScope.of(context).unfocus();
     
@@ -123,20 +123,17 @@ class _SignupPageState extends State<SignupPage> {
         _showSnack('Champs manquants'); return; 
       }
     } 
-    // ÉTAPE 2 : Compte (VÉRIFICATION SÉCURITÉ)
+    // ÉTAPE 2 : Compte
     else if (_currentPage == 1) {
-       // 1. Vérification si vide
        if (_emailController.text.isEmpty || _passwordController.text.isEmpty || _phoneController.text.isEmpty) { 
          _showSnack('Tout est requis'); return; 
        }
-       
-       // 2. Vérification longueur mot de passe
        if (_passwordController.text.length < 8) {
          _showErrorDialog(
            "Mot de passe trop court", 
            "Pour ta sécurité, ton mot de passe doit contenir au moins 8 caractères."
          );
-         return; // On bloque ici
+         return; 
        }
     } 
     // ÉTAPE 3 : Localisation
@@ -274,7 +271,7 @@ class _SignupPageState extends State<SignupPage> {
     );
   }
 
-  // --- PAGES CENTRÉES ET REMPLIES ---
+  // --- PAGES CENTRÉES (AVEC ASSETS LOCAUX) ---
 
   Widget _buildStep1_Identity() {
     return Center(
@@ -283,7 +280,11 @@ class _SignupPageState extends State<SignupPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            SizedBox(height: 180, child: Lottie.asset('assets/animations/hello.json', fit: BoxFit.contain)),
+            // Animation LOCALE
+            SizedBox(
+              height: 180, 
+              child: Lottie.asset('assets/animations/hello.json', fit: BoxFit.contain)
+            ),
             const SizedBox(height: 20),
             Text("Enchanté !", style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText), textAlign: TextAlign.center),
             const SizedBox(height: 8),
@@ -303,7 +304,11 @@ class _SignupPageState extends State<SignupPage> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            SizedBox(height: 180, child: Lottie.asset('assets/animations/login.json', fit: BoxFit.contain)),
+            // Animation LOCALE
+            SizedBox(
+              height: 180, 
+              child: Lottie.asset('assets/animations/login.json', fit: BoxFit.contain)
+            ),
             const SizedBox(height: 20),
             Text("Sécurité", style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText), textAlign: TextAlign.center),
             const SizedBox(height: 8),
@@ -324,7 +329,11 @@ class _SignupPageState extends State<SignupPage> {
         padding: const EdgeInsets.all(24),
         child: Column(
           children: [
-            SizedBox(height: 180, child: Lottie.asset('assets/animations/paperplane.json', fit: BoxFit.contain)),
+            // Animation LOCALE
+            SizedBox(
+              height: 180, 
+              child: Lottie.asset('assets/animations/paperplane.json', fit: BoxFit.contain)
+            ),
             const SizedBox(height: 20),
             Text("Localisation", style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText), textAlign: TextAlign.center),
             const SizedBox(height: 8),

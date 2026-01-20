@@ -56,12 +56,12 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
             children: [
               const Spacer(flex: 1), 
               
-              // 1. ANIMATION LOTTIE (LOCALE)
+              // --- C'EST ICI QUE ÇA SE JOUE (VERSION LOCALE) ---
               SizedBox(
                 height: 250, 
                 width: double.infinity,
                 child: Lottie.asset(
-                  'assets/animations/community.json', 
+                  'assets/animations/community.json', // Utilise ton fichier local
                   controller: _controller,
                   fit: BoxFit.contain,
                   onLoaded: (composition) {
@@ -70,6 +70,7 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
                       ..forward(); 
                   },
                   errorBuilder: (context, error, stackTrace) {
+                    // Petite sécurité : si ça charge pas, icône orange
                     return const Center(child: Icon(Icons.people, size: 80, color: Colors.orange));
                   },
                 ),

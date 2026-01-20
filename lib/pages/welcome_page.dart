@@ -56,7 +56,7 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
             children: [
               const Spacer(flex: 1), 
               
-              // 1. ANIMATION LOTTIE
+              // 1. ANIMATION LOTTIE (LOCALE)
               SizedBox(
                 height: 250, 
                 width: double.infinity,
@@ -66,18 +66,18 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
                   fit: BoxFit.contain,
                   onLoaded: (composition) {
                     _controller
-                      ..duration = composition.duration // <--- VITESSE NORMALE (J'ai enlevé le * 2)
-                      ..forward(); // .forward() fait jouer l'anim une fois et la fige à la fin
+                      ..duration = composition.duration 
+                      ..forward(); 
                   },
                   errorBuilder: (context, error, stackTrace) {
-                    return const Center(child: Icon(Icons.error, color: Colors.red));
+                    return const Center(child: Icon(Icons.people, size: 80, color: Colors.orange));
                   },
                 ),
               ),
               
               const SizedBox(height: 20),
 
-              // 2. LE LOGO (Transition Hero)
+              // 2. LE LOGO
               Column(
                 children: [
                   const Text(

@@ -40,7 +40,7 @@ class _SignupPageState extends State<SignupPage> {
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: Colors.transparent, // Pour gérer nous-mêmes les arrondis
+        backgroundColor: Colors.transparent, 
         elevation: 0,
         child: Container(
           padding: const EdgeInsets.all(24),
@@ -56,13 +56,12 @@ class _SignupPageState extends State<SignupPage> {
             ],
           ),
           child: Column(
-            mainAxisSize: MainAxisSize.min, // La fenêtre s'adapte au contenu
+            mainAxisSize: MainAxisSize.min, 
             children: [
-              // Icône d'alerte stylée
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF8F5), // Fond crème très clair
+                  color: const Color(0xFFFFF8F5),
                   shape: BoxShape.circle,
                 ),
                 child: Icon(Icons.gpp_maybe_rounded, size: 36, color: _creamyOrange),
@@ -91,7 +90,6 @@ class _SignupPageState extends State<SignupPage> {
               ),
               const SizedBox(height: 24),
               
-              // Bouton pour fermer
               SizedBox(
                 width: double.infinity,
                 height: 50,
@@ -226,26 +224,6 @@ class _SignupPageState extends State<SignupPage> {
     );
   }
 
-  Widget _buildPageTitle(String title, String subtitle, IconData icon) {
-    return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(color: _creamyOrange.withOpacity(0.1), shape: BoxShape.circle),
-          child: Icon(icon, size: 40, color: _creamyOrange),
-        ),
-        const SizedBox(height: 20),
-        Text(title, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText), textAlign: TextAlign.center),
-        const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 30),
-          child: Text(subtitle, style: TextStyle(fontSize: 16, color: Colors.grey.shade600, height: 1.4), textAlign: TextAlign.center),
-        ),
-        const SizedBox(height: 40),
-      ],
-    );
-  }
-
   Widget _buildPillField({required TextEditingController controller, required String hint, required IconData icon, bool isNumber = false, bool isPassword = false}) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
@@ -276,7 +254,7 @@ class _SignupPageState extends State<SignupPage> {
         value: value,
         icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey.shade400),
         isExpanded: true,
-        style: TextStyle(color: _darkText, fontWeight: FontWeight.w600, fontSize: 16, fontFamily: 'Avenir'),
+        style: TextStyle(color: _darkText, fontWeight: FontWeight.w600, fontSize: 16),
         dropdownColor: Colors.white,
         borderRadius: BorderRadius.circular(20),
         decoration: InputDecoration(

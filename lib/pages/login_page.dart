@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:lottie/lottie.dart'; // <--- AJOUTÉ
 import '../widgets/nora_logo.dart'; 
 import 'signup_page.dart'; 
 
@@ -16,7 +17,6 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _isGoogleLoading = false;
   
-  // --- NOUVELLE COULEUR DOUCE (CREAMY ORANGE) ---
   final Color _creamyOrange = const Color(0xFFFF914D); 
 
   Future<void> _signIn() async {
@@ -82,12 +82,13 @@ class _LoginPageState extends State<LoginPage> {
             crossAxisAlignment: CrossAxisAlignment.center,
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const SizedBox(height: 10),
+              // --- ANIMATION AJOUTÉE ICI ---
+              SizedBox(
+                height: 200,
+                child: Lottie.asset('assets/animations/login.json', fit: BoxFit.contain),
+              ),
               
-              // Le Logo reste intact (avec son orange vif d'origine défini dans le widget)
-              const NoraLogo(size: 45),
-              
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
 
               const Text(
                 "Bon retour !",
@@ -138,7 +139,7 @@ class _LoginPageState extends State<LoginPage> {
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _signIn,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _creamyOrange, // <-- Utilisation du nouvel orange
+                    backgroundColor: _creamyOrange, 
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
@@ -193,7 +194,7 @@ class _LoginPageState extends State<LoginPage> {
                       "Rejoindre NORA",
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: _creamyOrange, // <-- Lien couleur crème
+                        color: _creamyOrange,
                         decoration: TextDecoration.underline,
                         decorationColor: _creamyOrange,
                         fontSize: 15
@@ -236,7 +237,6 @@ class _LoginPageState extends State<LoginPage> {
           filled: true,
           fillColor: Colors.white,
           contentPadding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
-          // BORDURE FOCUS COULEUR CRÈME
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(30),
             borderSide: BorderSide(color: _creamyOrange, width: 1.5), 

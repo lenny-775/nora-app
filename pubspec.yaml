@@ -26,6 +26,9 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   
-  # Déclaration des assets pour Lottie
+  # CORRECTION : On liste chaque fichier un par un pour forcer l'inclusion
   assets:
-    - assets/animations/
+    - assets/animations/community.json
+    - assets/animations/hello.json
+    - assets/animations/login.json
+    - assets/animations/paperplane.json

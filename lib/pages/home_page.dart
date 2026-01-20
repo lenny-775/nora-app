@@ -1,13 +1,11 @@
-import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'components.dart';
 import 'profile_page.dart';
 import 'create_post_page.dart';
-import 'conversations_page.dart'; 
+import 'conversations_page.dart';
 import 'post_details_page.dart';
 import 'search_page.dart';
-import 'chat_page.dart';
 import 'welcome_page.dart';
 import 'other_profile_page.dart';
 
@@ -20,11 +18,18 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0; 
-  String _userCity = "Montréal"; 
   
-  String _selectedFilter = 'Tout';
-  final List<String> _filters = ['Tout', '🏠 Logement', '💼 Emploi', '🍻 Sorties', '🆘 Entraide', '📢 Annonce'];
+  String _currentCityFilter = "Montréal"; 
+  String _currentTopicFilter = "Tout";
+  
+  final List<String> _topics = ['Tout', '🏠 Logement', '💼 Emploi', '🍻 Sorties', '🆘 Entraide', '📢 Annonce'];
   final List<String> _cities = ['Montréal', 'Québec', 'Toronto', 'Vancouver', 'Ottawa', 'Calgary', 'Edmonton', 'Winnipeg', 'Halifax', 'Victoria'];
+
+  // --- PALETTE DE COULEURS ---
+  final Color _creamyOrange = const Color(0xFFFF914D);
+  final Color _darkText = const Color(0xFF2D3436);
+  final Color _backgroundColor = const Color(0xFFFFF8F5);
+  final Color _softGrey = const Color(0xFFF4F6F8); 
 
   @override
   void initState() {
@@ -47,276 +52,271 @@ class _HomePageState extends State<HomePage> {
     try {
       final data = await Supabase.instance.client.from('profiles').select('city').eq('id', user.id).maybeSingle();
       if (mounted && data != null && data['city'] != null) {
-        setState(() => _userCity = data['city']);
+        setState(() => _currentCityFilter = data['city']);
       }
     } catch (e) {
       debugPrint("Erreur profil: $e");
     }
   }
 
-  Future<void> _updateCity(String newCity) async {
+  // --- BADGE NOTIF ---
+  Widget _buildChatIconWithBadge() {
     final user = Supabase.instance.client.auth.currentUser;
-    if (user != null) {
-      setState(() => _userCity = newCity);
-      await Supabase.instance.client.from('profiles').update({'city': newCity}).eq('id', user.id);
-    }
-  }
-
-  // --- LOGIQUE NOTIFICATIONS CORRIGÉE (FILTRAGE MANUEL) ---
-  Widget _buildNotificationBadge() {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return const Icon(Icons.chat_bubble_outline, color: Colors.black87);
+    if (user == null) return const Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 26);
 
     return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: Supabase.instance.client
-          .from('messages')
-          .stream(primaryKey: ['id']),
+      stream: Supabase.instance.client.from('messages').stream(primaryKey: ['id']),
       builder: (context, snapshot) {
-        int unreadTotal = 0;
+        int unreadCount = 0;
         if (snapshot.hasData) {
-          // On filtre manuellement pour éviter les erreurs de paramètres Null en SQL
-          unreadTotal = snapshot.data!.where((m) => 
-            m['read_at'] == null && m['sender_id'] != user.id
-          ).length;
+          unreadCount = snapshot.data!.where((m) => m['read_at'] == null && m['sender_id'] != user.id).length;
+        }
+
+        if (unreadCount == 0) {
+          return const Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 26);
         }
 
         return Stack(
           clipBehavior: Clip.none,
           children: [
-            const Icon(Icons.chat_bubble_outline, color: Colors.black87, size: 26),
-            if (unreadTotal > 0)
-              Positioned(
-                right: -4,
-                top: -4,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                  constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
-                  child: Text(
-                    unreadTotal > 9 ? '9+' : '$unreadTotal',
-                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                    textAlign: TextAlign.center,
-                  ),
+            const Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 26),
+            Positioned(
+              right: -4,
+              top: -4,
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent, 
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 1.5)
+                ),
+                constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                child: Text(
+                  unreadCount > 9 ? '9+' : '$unreadCount',
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
               ),
+            ),
           ],
         );
       },
     );
   }
 
-  Future<void> _toggleLike(Map<String, dynamic> post) async {
-    final user = Supabase.instance.client.auth.currentUser;
-    if (user == null) return;
-
-    List<dynamic> likedBy = List.from(post['liked_by'] ?? []);
-    setState(() {
-      if (likedBy.contains(user.id)) {
-        likedBy.remove(user.id);
-      } else {
-        likedBy.add(user.id);
-      }
-    });
-
-    await Supabase.instance.client.from('posts').update({'liked_by': likedBy}).eq('id', post['id']);
+  // --- FILTRES ---
+  void _showFilterModal() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Container(
+              padding: const EdgeInsets.all(24),
+              height: 450,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)))),
+                  const SizedBox(height: 20),
+                  Text("Filtrer le fil d'actu", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _darkText)),
+                  const SizedBox(height: 30),
+                  const Text("Ville", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 16)),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    height: 45,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _cities.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 10),
+                      itemBuilder: (context, index) {
+                        final city = _cities[index];
+                        final isSelected = _currentCityFilter == city;
+                        return ChoiceChip(
+                          label: Text(city),
+                          selected: isSelected,
+                          selectedColor: _creamyOrange,
+                          backgroundColor: Colors.white,
+                          side: BorderSide(color: isSelected ? _creamyOrange : Colors.grey.shade200),
+                          labelStyle: TextStyle(color: isSelected ? Colors.white : _darkText, fontWeight: FontWeight.w600),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                          onSelected: (bool selected) {
+                            setModalState(() => _currentCityFilter = city);
+                            setState(() {}); 
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 25),
+                  const Text("Sujet", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey, fontSize: 16)),
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 10, offset: const Offset(0, 4))]),
+                    child: DropdownButtonFormField<String>(
+                      value: _currentTopicFilter,
+                      icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey.shade400),
+                      decoration: InputDecoration(filled: true, fillColor: Colors.transparent, contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15), border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none)),
+                      style: TextStyle(color: _darkText, fontWeight: FontWeight.w600, fontSize: 16),
+                      dropdownColor: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      items: _topics.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
+                      onChanged: (v) { setModalState(() => _currentTopicFilter = v!); setState(() {}); },
+                    ),
+                  ),
+                  const Spacer(),
+                  SizedBox(
+                    width: double.infinity, height: 55,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(backgroundColor: _creamyOrange, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30))),
+                      child: const Text("Appliquer", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+        );
+      },
+    );
   }
 
   Future<void> _toggleSavePost(int postId) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
-
     try {
-      final existing = await Supabase.instance.client
-          .from('saved_posts')
-          .select()
-          .eq('user_id', user.id)
-          .eq('post_id', postId)
-          .maybeSingle();
-
+      final existing = await Supabase.instance.client.from('saved_posts').select().eq('user_id', user.id).eq('post_id', postId).maybeSingle();
       if (existing == null) {
-        await Supabase.instance.client.from('saved_posts').insert({
-          'user_id': user.id,
-          'post_id': postId,
-        });
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Post enregistré ! 🔖")));
+        await Supabase.instance.client.from('saved_posts').insert({'user_id': user.id, 'post_id': postId});
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sauvegardé ! 🔖")));
       } else {
-        await Supabase.instance.client
-            .from('saved_posts')
-            .delete()
-            .eq('user_id', user.id)
-            .eq('post_id', postId);
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Supprimé des favoris.")));
+        await Supabase.instance.client.from('saved_posts').delete().eq('user_id', user.id).eq('post_id', postId);
+        if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Retiré des favoris.")));
       }
-    } catch (e) {
-      debugPrint("Erreur favoris: $e");
-    }
+      setState(() {}); 
+    } catch (e) { debugPrint("Erreur favoris: $e"); }
   }
 
-  void _sharePost(Map<String, dynamic> post) {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text("Partager à...", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-              const SizedBox(height: 10),
-              Expanded(
-                child: FutureBuilder<List<Map<String, dynamic>>>(
-                  future: Supabase.instance.client.from('profiles').select().neq('id', Supabase.instance.client.auth.currentUser!.id).limit(20),
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
-                    final users = snapshot.data!;
-                    return ListView.builder(
-                      itemCount: users.length,
-                      itemBuilder: (context, index) {
-                        final user = users[index];
-                        return ListTile(
-                          leading: CircleAvatar(backgroundImage: NetworkImage(user['avatar_url'] ?? "https://i.pravatar.cc/300")),
-                          title: Text(user['first_name'] ?? "Utilisateur"),
-                          trailing: const Icon(Icons.send, color: Color(0xFFFF6B00)),
-                          onTap: () => _sendPostToUser(post, user),
-                        );
-                      },
-                    );
-                  },
+  Future<void> _toggleLike(Map<String, dynamic> post) async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    List<dynamic> likedBy = List.from(post['liked_by'] ?? []);
+    setState(() {
+      likedBy.contains(user.id) ? likedBy.remove(user.id) : likedBy.add(user.id);
+    });
+    await Supabase.instance.client.from('posts').update({'liked_by': likedBy}).eq('id', post['id']);
+  }
+
+  // --- APP BAR ---
+  PreferredSizeWidget _buildAppBar() {
+    if (_selectedIndex != 0) return AppBar(toolbarHeight: 0, elevation: 0, backgroundColor: _backgroundColor); 
+    return AppBar(
+      backgroundColor: _backgroundColor, elevation: 0, automaticallyImplyLeading: false, titleSpacing: 24,
+      title: Row(
+        children: [
+          GestureDetector(
+            onTap: _showFilterModal,
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(18), boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 10, offset: const Offset(0, 4))]),
+              child: const Icon(Icons.tune_rounded, color: Colors.black87, size: 22),
+            ),
+          ),
+          const SizedBox(width: 15),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())),
+              child: Container(
+                height: 50,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: _creamyOrange.withOpacity(0.1), blurRadius: 15, offset: const Offset(0, 5))]),
+                child: Row(
+                  children: [
+                    Icon(Icons.search_rounded, color: _creamyOrange, size: 24),
+                    const SizedBox(width: 12),
+                    Text("Rechercher...", style: TextStyle(color: Colors.grey.shade400, fontSize: 16)),
+                  ],
                 ),
               ),
-            ],
+            ),
           ),
-        );
-      },
-    );
-  }
-
-  Future<void> _sendPostToUser(Map<String, dynamic> post, Map<String, dynamic> receiver) async {
-    Navigator.pop(context); 
-    final myId = Supabase.instance.client.auth.currentUser!.id;
-    try {
-      final existingConvId = await Supabase.instance.client.rpc('get_conversation_id', params: {'user1': myId, 'user2': receiver['id']});
-      int conversationId;
-      if (existingConvId != null) {
-        conversationId = existingConvId;
-      } else {
-        final newConv = await Supabase.instance.client.from('conversations').insert({}).select().single();
-        conversationId = newConv['id'];
-        await Supabase.instance.client.from('conversation_participants').insert([{'conversation_id': conversationId, 'user_id': myId}, {'conversation_id': conversationId, 'user_id': receiver['id']}]);
-      }
-      if (mounted) {
-        Navigator.push(context, MaterialPageRoute(builder: (context) => ChatPage(conversationId: conversationId, receiverId: receiver['id'], receiverName: receiver['first_name'] ?? "Utilisateur", pendingPost: post)));
-      }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: $e")));
-    }
-  }
-
-  void _showCityPicker() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.symmetric(vertical: 20),
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: _cities.length,
-            itemBuilder: (context, index) {
-              final city = _cities[index];
-              return ListTile(
-                leading: const Icon(Icons.location_city, color: Color(0xFFFF6B00)),
-                title: Text(city),
-                trailing: city == _userCity ? const Icon(Icons.check, color: Colors.green) : null,
-                onTap: () {
-                  _updateCity(city);
-                  Navigator.pop(context);
-                },
-              );
+          const SizedBox(width: 15),
+          GestureDetector(
+            onTap: () async {
+              await Navigator.push(context, MaterialPageRoute(builder: (context) => const CreatePostPage()));
+              setState(() {});
             },
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: _creamyOrange, borderRadius: BorderRadius.circular(18), boxShadow: [BoxShadow(color: _creamyOrange.withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 4))]),
+              child: const Icon(Icons.add_rounded, color: Colors.white, size: 26),
+            ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 
   Widget _buildFeed() {
     final myId = Supabase.instance.client.auth.currentUser?.id;
-
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start, 
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 15),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey.shade300), boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 5, offset: const Offset(0, 2))]),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                value: _selectedFilter,
-                icon: const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFF6B00)),
-                isExpanded: true, 
-                style: const TextStyle(color: Colors.black87, fontSize: 16, fontWeight: FontWeight.bold),
-                borderRadius: BorderRadius.circular(20),
-                onChanged: (String? newValue) => setState(() => _selectedFilter = newValue!),
-                items: _filters.map<DropdownMenuItem<String>>((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Row(
-                      children: [
-                        if (value == 'Tout') const Icon(Icons.filter_list, size: 18, color: Colors.grey),
-                        if (value == 'Tout') const SizedBox(width: 8),
-                        Text(value),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
+          padding: const EdgeInsets.fromLTRB(24, 15, 24, 10),
+          child: Row(
+            children: [
+              Icon(Icons.location_on_rounded, size: 18, color: _creamyOrange),
+              const SizedBox(width: 5),
+              Text(_currentCityFilter, style: TextStyle(fontWeight: FontWeight.w800, color: _darkText, fontSize: 16)),
+              const Spacer(),
+              if (_currentTopicFilter != "Tout")
+                 Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6), decoration: BoxDecoration(color: _creamyOrange.withOpacity(0.15), borderRadius: BorderRadius.circular(20)), child: Text(_currentTopicFilter, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _creamyOrange))),
+            ],
           ),
         ),
         Expanded(
           child: StreamBuilder<List<Map<String, dynamic>>>(
             stream: Supabase.instance.client.from('posts').stream(primaryKey: ['id']).order('created_at', ascending: false),
             builder: (context, snapshot) {
-              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(color: Color(0xFFFF6B00)));
+              if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: _creamyOrange));
               final allPosts = snapshot.data!;
-              var posts = allPosts.where((p) => p['city'] == _userCity).toList();
-              if (_selectedFilter != 'Tout') posts = posts.where((p) => p['category'] == _selectedFilter).toList();
+              final posts = allPosts.where((p) {
+                final matchCity = (p['city'] ?? '') == _currentCityFilter;
+                final matchTopic = _currentTopicFilter == 'Tout' || (p['category'] ?? '') == _currentTopicFilter;
+                return matchCity && matchTopic;
+              }).toList();
 
-              if (posts.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.filter_none, size: 60, color: Colors.grey.shade300),
-                      const SizedBox(height: 20),
-                      Text("Aucun post trouvé", style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
-                    ],
-                  ),
-                );
-              }
+              if (posts.isEmpty) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.filter_none, size: 60, color: Colors.grey.shade300), const SizedBox(height: 20), Text("Rien ici pour l'instant à $_currentCityFilter...", style: TextStyle(color: Colors.grey.shade600))]));
 
               return ListView.builder(
                 padding: const EdgeInsets.only(top: 5, bottom: 100), 
                 itemCount: posts.length,
                 itemBuilder: (context, index) {
                   final post = posts[index];
-                  final createdAt = DateTime.tryParse(post['created_at'].toString()) ?? DateTime.now();
-                  final difference = DateTime.now().difference(createdAt);
-                  String timeAgo = difference.inMinutes < 60 ? "${difference.inMinutes} min" : difference.inHours < 24 ? "${difference.inHours} h" : "${difference.inDays} j";
-                  List<dynamic> likedBy = post['liked_by'] ?? [];
-                  
-                  return FutureBuilder<Map<String, dynamic>>(
-                    future: Supabase.instance.client.from('profiles').select('first_name, avatar_url').eq('id', post['user_id']).single(),
-                    builder: (context, profileSnapshot) {
-                      String name = profileSnapshot.data?['first_name'] ?? "Voyageur";
-                      String? avatarUrl = profileSnapshot.data?['avatar_url'];
-                      return _buildCustomPostCard(
-                        post: post, name: name, avatarUrl: avatarUrl, timeAgo: timeAgo,
-                        isLiked: likedBy.contains(myId), likesCount: likedBy.length, myId: myId ?? '',
-                      );
+                  return FutureBuilder<List<dynamic>>(
+                    future: Future.wait<dynamic>([
+                      Supabase.instance.client.from('profiles').select().eq('id', post['user_id']).single(), 
+                      Supabase.instance.client.from('comments').count().eq('post_id', post['id']), 
+                      myId != null ? Supabase.instance.client.from('saved_posts').select().eq('user_id', myId).eq('post_id', post['id']).maybeSingle() : Future.value(null)
+                    ]),
+                    builder: (context, snap) {
+                      if (!snap.hasData) return const SizedBox(); 
+                      final data = snap.data!;
+                      final author = Map<String, dynamic>.from(data[0] as Map);
+                      final commentsCount = data[1] as int;
+                      final isSaved = data[2] != null;
+                      final createdAt = DateTime.tryParse(post['created_at'].toString()) ?? DateTime.now();
+                      final diff = DateTime.now().difference(createdAt);
+                      String timeAgo = diff.inMinutes < 60 ? "${diff.inMinutes} min" : diff.inHours < 24 ? "${diff.inHours} h" : "${diff.inDays} j";
+                      List<dynamic> likedBy = post['liked_by'] ?? [];
+
+                      return _buildModernPostCard(post, author, timeAgo, likedBy.contains(myId), likedBy.length, commentsCount, isSaved, myId);
                     },
                   );
                 },
@@ -328,135 +328,150 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildCustomPostCard({
-    required Map<String, dynamic> post, required String name, required String? avatarUrl, required String timeAgo,
-    required bool isLiked, required int likesCount, required String myId,
-  }) {
+  // --- NOUVEAU DESIGN MODERNE DU POST ---
+  Widget _buildModernPostCard(Map<String, dynamic> post, Map<String, dynamic> author, String timeAgo, bool isLiked, int likesCount, int commentsCount, bool isSaved, String? myId) {
     bool isMyPost = post['user_id'] == myId;
-    String category = post['category'] ?? 'Général';
-    String? postImage = post['image_url'];
-    int commentsCount = 0; 
-
+    
     return GestureDetector(
-      onTap: () {
-        Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(post: post, userName: name, timeAgo: timeAgo)));
-      },
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(post: post, userName: author['first_name'], timeAgo: timeAgo))),
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 10, offset: const Offset(0, 5))]),
+        margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(30), // Coins très arrondis "Pill"
+          boxShadow: [
+            BoxShadow(color: Colors.grey.shade200.withOpacity(0.8), blurRadius: 20, offset: const Offset(0, 10))
+          ],
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            GestureDetector(
-              onTap: () {
-                if (isMyPost) {
-                  setState(() => _selectedIndex = 2);
-                } else {
-                  Navigator.push(context, MaterialPageRoute(builder: (context) => OtherProfilePage(userId: post['user_id'])));
-                }
-              },
+            // 1. EN-TÊTE DU POST
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 20,
-                    backgroundColor: Colors.grey.shade200,
-                    backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-                    child: avatarUrl == null ? const Icon(Icons.person, color: Colors.grey) : null,
+                  GestureDetector(
+                    onTap: () => isMyPost ? setState(()=>_selectedIndex=2) : Navigator.push(context, MaterialPageRoute(builder: (context) => OtherProfilePage(userId: post['user_id']))),
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: _creamyOrange.withOpacity(0.3), width: 2)), // Anneau subtil
+                      child: CircleAvatar(radius: 20, backgroundImage: NetworkImage(author['avatar_url'] ?? "https://i.pravatar.cc/300")),
+                    ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                        Text(author['first_name'] ?? "User", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: _darkText)),
+                        const SizedBox(height: 2),
                         Row(
                           children: [
-                            Text(timeAgo, style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
-                            Padding(padding: const EdgeInsets.symmetric(horizontal: 5), child: Icon(Icons.circle, size: 4, color: Colors.grey.shade300)),
+                            Text(timeAgo, style: TextStyle(color: Colors.grey.shade400, fontSize: 12, fontWeight: FontWeight.w600)),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 6),
+                              child: Icon(Icons.circle, size: 4, color: Colors.grey.shade300),
+                            ),
+                            // Badge Catégorie Minimaliste
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: const Color(0xFFFF6B00).withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
-                              child: Text(category, style: const TextStyle(fontSize: 10, color: Color(0xFFFF6B00), fontWeight: FontWeight.bold)),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(color: _creamyOrange.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                              child: Text(post['category'] ?? 'Divers', style: TextStyle(fontSize: 10, color: _creamyOrange, fontWeight: FontWeight.w800)),
                             )
                           ],
                         ),
                       ],
                     ),
                   ),
-                  if (isMyPost)
-                    IconButton(icon: const Icon(Icons.more_horiz, color: Colors.grey), onPressed: () {})
-                  else
-                    IconButton(
-                      icon: const Icon(Icons.bookmark_border, color: Colors.grey), 
-                      onPressed: () => _toggleSavePost(post['id']),
-                    ),
+                  // Bouton Sauvegarder (Icône simple)
+                  IconButton(
+                    icon: Icon(isSaved ? Icons.bookmark_rounded : Icons.bookmark_border_rounded, color: isSaved ? _creamyOrange : Colors.grey.shade300),
+                    onPressed: () => _toggleSavePost(post['id']),
+                  )
                 ],
               ),
             ),
-            
-            const SizedBox(height: 12),
-            Text(post['content'] ?? "", style: const TextStyle(fontSize: 15, height: 1.4)),
-            if (postImage != null && postImage.isNotEmpty)
-              Padding(padding: const EdgeInsets.only(top: 12), child: ClipRRect(borderRadius: BorderRadius.circular(15), child: Image.network(postImage, fit: BoxFit.cover, width: double.infinity))),
-            
-            const SizedBox(height: 15),
-            const Divider(height: 1, color: Color(0xFFEEEEEE)), 
-            const SizedBox(height: 12),
 
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  children: [
-                    GestureDetector(
-                      onTap: () => _toggleLike(post),
+            const SizedBox(height: 16),
+
+            // 2. CONTENU TEXTE
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Text(post['content'] ?? "", style: TextStyle(fontSize: 15, height: 1.5, color: _darkText)),
+            ),
+
+            const SizedBox(height: 16),
+
+            // 3. IMAGE (AVEC TAILLE MAXIMALE ET ROGNAGE PROPRE)
+            if (post['image_url'] != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10), // Petit padding pour effet "cadre"
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(25), // Arrondi harmonieux
+                  child: Container(
+                    height: 350, // <--- TAILLE MAX IMPOSÉE
+                    width: double.infinity,
+                    color: Colors.grey.shade100, // Fond gris en attendant
+                    child: Image.network(
+                      post['image_url'], 
+                      fit: BoxFit.cover, // <--- C'est ici que la magie opère (remplit le cadre)
+                      width: double.infinity,
+                      errorBuilder: (context, error, stackTrace) => const Center(child: Icon(Icons.broken_image, color: Colors.grey)),
+                    ),
+                  ),
+                ),
+              ),
+
+            // 4. BARRE D'ACTIONS "CAPSULES"
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  // Capsule Like
+                  GestureDetector(
+                    onTap: () => _toggleLike(post),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isLiked ? Colors.red.withOpacity(0.1) : _softGrey,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
                       child: Row(
                         children: [
-                          Icon(isLiked ? Icons.favorite : Icons.favorite_border, color: isLiked ? Colors.red : Colors.grey, size: 22),
-                          const SizedBox(width: 5),
-                          if (likesCount > 0) Text("$likesCount", style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
+                          Icon(isLiked ? Icons.favorite_rounded : Icons.favorite_border_rounded, color: isLiked ? Colors.redAccent : Colors.grey.shade600, size: 20),
+                          const SizedBox(width: 6),
+                          Text("$likesCount", style: TextStyle(color: isLiked ? Colors.redAccent : Colors.grey.shade600, fontWeight: FontWeight.w700, fontSize: 13)),
                         ],
                       ),
                     ),
-                    const SizedBox(width: 20),
-                    Row(
+                  ),
+                  const SizedBox(width: 10),
+                  // Capsule Commentaire
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _softGrey,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
                       children: [
-                        const Icon(Icons.chat_bubble_outline, color: Colors.grey, size: 20),
-                        const SizedBox(width: 5),
-                        Text("$commentsCount", style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
+                        Icon(Icons.chat_bubble_outline_rounded, color: Colors.grey.shade600, size: 20),
+                        const SizedBox(width: 6),
+                        Text("$commentsCount", style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.w700, fontSize: 13)),
                       ],
                     ),
-                  ],
-                ),
-                IconButton(
-                  constraints: const BoxConstraints(), 
-                  padding: EdgeInsets.zero,
-                  icon: const Icon(Icons.send_outlined, color: Colors.grey), 
-                  onPressed: () => _sharePost(post)
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            GestureDetector(
-              onTap: () {
-                 Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(post: post, userName: name, timeAgo: timeAgo)));
-              },
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF5F6F8), 
-                  borderRadius: BorderRadius.circular(30),
-                ),
-                child: Row(
-                  children: [
-                    Text(
-                      "Ajouter un commentaire...",
-                      style: TextStyle(color: Colors.grey.shade500, fontSize: 14),
-                    ),
-                  ],
-                ),
+                  ),
+                  const Spacer(),
+                  // Bouton Share
+                  IconButton(
+                    icon: Icon(Icons.share_rounded, color: Colors.grey.shade400, size: 22),
+                    onPressed: () {}, // Action future
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                  ),
+                ],
               ),
             ),
           ],
@@ -465,57 +480,57 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
-    if (_selectedIndex == 2) return AppBar(backgroundColor: Colors.transparent, elevation: 0);
-    return AppBar(
-      backgroundColor: const Color(0xFFFFF8F5), elevation: 0, automaticallyImplyLeading: false, titleSpacing: 10, 
-      title: Row(
-        children: [
-          GestureDetector(
-            onTap: _showCityPicker,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)]),
-              child: Row(children: [const Icon(Icons.location_on, color: Color(0xFFFF6B00), size: 18), const SizedBox(width: 5), Text(_userCity, style: const TextStyle(color: Colors.black, fontSize: 14, fontWeight: FontWeight.bold))]),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(child: GestureDetector(onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())), child: Container(height: 40, padding: const EdgeInsets.symmetric(horizontal: 15), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), border: Border.all(color: Colors.white), boxShadow: [BoxShadow(color: const Color(0xFFFF6B00).withOpacity(0.05), blurRadius: 10)]), child: Row(children: [Icon(Icons.search, color: Colors.grey.shade400, size: 20), const SizedBox(width: 10), Text("Chercher un pvtiste...", style: TextStyle(color: Colors.grey.shade400, fontSize: 14))])))),
-        ],
-      ),
-      actions: [
-        IconButton(
-          icon: _buildNotificationBadge(),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ConversationsPage())),
-        ), 
-        const SizedBox(width: 10)
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8F5), extendBody: true, appBar: _buildAppBar(),
-      body: [ _buildFeed(), const SizedBox(), const ProfilePage()][_selectedIndex],
+      backgroundColor: _backgroundColor,
+      extendBody: true,
+      appBar: _buildAppBar(),
+      body: IndexedStack(
+        index: _selectedIndex,
+        children: [ _buildFeed(), const ConversationsPage(), const ProfilePage() ],
+      ),
       bottomNavigationBar: Container(
-        margin: const EdgeInsets.only(left: 20, right: 20, bottom: 30), height: 70,
-        decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), borderRadius: BorderRadius.circular(35), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 5))], border: Border.all(color: Colors.white, width: 1)),
-        child: ClipRRect(borderRadius: BorderRadius.circular(35), child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
-          _buildAnimatedNavItem(0, Icons.home_outlined, Icons.home_filled),
-          GestureDetector(
-            onTap: () async {
-              if (await Navigator.push(context, MaterialPageRoute(builder: (context) => const CreatePostPage())) == true) setState(() {});
-            },
-            child: Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: const Color(0xFFFF6B00), shape: BoxShape.circle, boxShadow: [BoxShadow(color: const Color(0xFFFF6B00).withOpacity(0.4), blurRadius: 10, offset: const Offset(0, 4))]), child: const Icon(Icons.add, color: Colors.white, size: 28)),
-          ),
-          _buildAnimatedNavItem(2, Icons.person_outline, Icons.person),
-        ]))),
+        margin: const EdgeInsets.only(left: 24, right: 24, bottom: 34),
+        height: 75,
+        decoration: BoxDecoration(
+          color: Colors.white, 
+          borderRadius: BorderRadius.circular(40),
+          boxShadow: [BoxShadow(color: _darkText.withOpacity(0.08), blurRadius: 30, offset: const Offset(0, 10))]
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _buildNavItem(0, Icons.home_rounded, Icons.home_outlined),
+            GestureDetector(
+              onTap: () => setState(() => _selectedIndex = 1),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                width: 55, height: 55,
+                decoration: BoxDecoration(
+                  color: _selectedIndex == 1 ? _creamyOrange : Colors.grey.shade200,
+                  shape: BoxShape.circle,
+                  boxShadow: [if(_selectedIndex == 1) BoxShadow(color: _creamyOrange.withOpacity(0.4), blurRadius: 15, offset: const Offset(0, 6))]
+                ),
+                child: Center(child: _selectedIndex == 1 ? _buildChatIconWithBadge() : Icon(Icons.chat_bubble_outline_rounded, color: Colors.grey.shade500, size: 26)), 
+              ),
+            ),
+            _buildNavItem(2, Icons.person_rounded, Icons.person_outline_rounded),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildAnimatedNavItem(int index, IconData iconOff, IconData iconOn) {
-    return GestureDetector(onTap: () => setState(() => _selectedIndex = index), child: AnimatedContainer(duration: const Duration(milliseconds: 200), padding: const EdgeInsets.all(10), child: Icon(_selectedIndex == index ? iconOn : iconOff, color: _selectedIndex == index ? const Color(0xFFFF6B00) : Colors.grey.shade400, size: 28)));
+  Widget _buildNavItem(int index, IconData activeIcon, IconData inactiveIcon) {
+    bool isSelected = _selectedIndex == index;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedIndex = index),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(color: isSelected ? _creamyOrange.withOpacity(0.1) : Colors.transparent, shape: BoxShape.circle),
+        child: Icon(isSelected ? activeIcon : inactiveIcon, size: 30, color: isSelected ? _creamyOrange : Colors.grey.shade300),
+      ),
+    );
   }
 }

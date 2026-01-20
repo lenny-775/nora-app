@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'components.dart'; // Pour utiliser NoraPostCard
+import 'components.dart'; 
 import 'chat_page.dart';
 import 'post_details_page.dart';
 
 class OtherProfilePage extends StatefulWidget {
-  final String userId; // L'ID de la personne qu'on visite
+  final String userId; 
 
   const OtherProfilePage({super.key, required this.userId});
 
@@ -17,7 +17,13 @@ class _OtherProfilePageState extends State<OtherProfilePage> {
   bool _isLoading = true;
   bool _isMessageLoading = false;
   Map<String, dynamic>? _profileData;
-  List<Map<String, dynamic>> _userPosts = []; // Pour stocker ses posts
+  List<Map<String, dynamic>> _userPosts = [];
+
+  // COULEURS DESIGN SYSTEM
+  final Color _creamyOrange = const Color(0xFFFF914D);
+  final Color _darkText = const Color(0xFF2D3436);
+  final Color _backgroundColor = const Color(0xFFFFF8F5);
+  final Color _softGrey = const Color(0xFFF4F6F8);
 
   @override
   void initState() {
@@ -27,14 +33,14 @@ class _OtherProfilePageState extends State<OtherProfilePage> {
 
   Future<void> _fetchUserData() async {
     try {
-      // 1. Récupérer le Profil
+      // 1. Profil
       final profile = await Supabase.instance.client
           .from('profiles')
           .select()
           .eq('id', widget.userId)
           .single();
 
-      // 2. Récupérer ses Posts
+      // 2. Posts
       final posts = await Supabase.instance.client
           .from('posts')
           .select('*, profiles(first_name, avatar_url)')
@@ -56,13 +62,12 @@ class _OtherProfilePageState extends State<OtherProfilePage> {
     }
   }
 
-  // --- LOGIQUE DE CHAT (Mise à jour avec RPC) ---
+  // --- START CHAT (Rpc) ---
   Future<void> _startChat() async {
     setState(() => _isMessageLoading = true);
     final myId = Supabase.instance.client.auth.currentUser!.id;
 
     try {
-      // 1. On cherche la conversation via la fonction SQL (plus robuste)
       final existingConvId = await Supabase.instance.client.rpc('get_conversation_id', params: {
         'user1': myId, 
         'user2': widget.userId
@@ -71,21 +76,16 @@ class _OtherProfilePageState extends State<OtherProfilePage> {
       int conversationId;
 
       if (existingConvId != null) {
-        // Elle existe déjà
         conversationId = existingConvId;
       } else {
-        // Elle n'existe pas, on la crée
         final newConv = await Supabase.instance.client.from('conversations').insert({}).select().single();
         conversationId = newConv['id'];
-        
-        // On ajoute les participants
         await Supabase.instance.client.from('conversation_participants').insert([
           {'conversation_id': conversationId, 'user_id': myId},
           {'conversation_id': conversationId, 'user_id': widget.userId}
         ]);
       }
 
-      // 2. On ouvre le Chat
       if (mounted) {
         Navigator.push(
           context,
@@ -103,21 +103,20 @@ class _OtherProfilePageState extends State<OtherProfilePage> {
     }
   }
 
-  // Helper pour formater la date
   String _formatDate(String dateString) {
     final date = DateTime.tryParse(dateString) ?? DateTime.now();
     final diff = DateTime.now().difference(date);
     if (diff.inMinutes < 60) return "${diff.inMinutes} min";
     if (diff.inHours < 24) return "${diff.inHours} h";
-    return "${diff.inDays} j";
+    return "${date.day}/${date.month}";
   }
 
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFFFF8F5),
-        body: Center(child: CircularProgressIndicator(color: Color(0xFFFF6B00))),
+      return Scaffold(
+        backgroundColor: _backgroundColor,
+        body: Center(child: CircularProgressIndicator(color: _creamyOrange)),
       );
     }
 
@@ -125,7 +124,6 @@ class _OtherProfilePageState extends State<OtherProfilePage> {
       return const Scaffold(body: Center(child: Text("Utilisateur introuvable")));
     }
 
-    // Préparation des données
     final String firstName = _profileData?['first_name'] ?? "Voyageur";
     final String? avatarUrl = _profileData?['avatar_url'];
     final String bio = _profileData?['bio'] ?? "";
@@ -138,124 +136,201 @@ class _OtherProfilePageState extends State<OtherProfilePage> {
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8F5),
-      appBar: AppBar(
-        backgroundColor: const Color(0xFFFFF8F5),
-        elevation: 0,
-        leading: const BackButton(color: Colors.black),
-        title: Text(firstName, style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-        children: [
-          // --- HEADER PROFIL ---
-          Center(
-            child: Column(
-              children: [
-                CircleAvatar(
-                  radius: 55,
-                  backgroundColor: Colors.grey.shade300,
-                  backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-                  child: avatarUrl == null ? const Icon(Icons.person, size: 50, color: Colors.grey) : null,
-                ),
-                const SizedBox(height: 15),
-                Text(firstName, style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold)),
-                Text("$city • $status", style: TextStyle(color: Colors.grey.shade600, fontSize: 16)),
-                
-                const SizedBox(height: 20),
-                
-                // BOUTON MESSAGE
-                SizedBox(
-                  width: 200,
-                  child: ElevatedButton.icon(
-                    onPressed: _isMessageLoading ? null : _startChat,
-                    icon: _isMessageLoading 
-                      ? const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Icon(Icons.chat_bubble_outline),
-                    label: const Text("Message"),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFFF6B00),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+      backgroundColor: _backgroundColor,
+      // SafeArea pour éviter l'encoche
+      body: SafeArea(
+        child: Stack(
+          children: [
+            // SCROLL VIEW PRINCIPALE
+            SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(24, 60, 24, 24), // Marge en haut pour le bouton retour
+              physics: const BouncingScrollPhysics(),
+              child: Column(
+                children: [
+                  // --- AVATAR GLOW ---
+                  Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                      boxShadow: [BoxShadow(color: _creamyOrange.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 10))]
+                    ),
+                    child: CircleAvatar(
+                      radius: 60,
+                      backgroundColor: Colors.grey.shade200,
+                      backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                      child: avatarUrl == null ? Icon(Icons.person_rounded, size: 60, color: Colors.grey.shade400) : null,
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
-          
-          const SizedBox(height: 25),
+                  
+                  const SizedBox(height: 20),
+                  
+                  // --- INFOS ---
+                  Text(firstName, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText)),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.location_on_rounded, size: 16, color: _creamyOrange),
+                      const SizedBox(width: 4),
+                      Text("$city • $status", style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 24),
 
-          // --- BIO ---
-          if (bio.isNotEmpty)
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(15),
-                boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 5)],
+                  // --- BOUTON MESSAGE (PILLULE LARGE) ---
+                  SizedBox(
+                    width: 200,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: _isMessageLoading ? null : _startChat,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _creamyOrange,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        shadowColor: _creamyOrange.withOpacity(0.4),
+                      ),
+                      child: _isMessageLoading 
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.chat_bubble_outline_rounded, color: Colors.white),
+                              SizedBox(width: 10),
+                              Text("Message", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                            ],
+                          ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // --- BIO ---
+                  if (bio.isNotEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(20),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(25),
+                        boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 10, offset: const Offset(0, 5))],
+                      ),
+                      child: Text(bio, style: TextStyle(fontSize: 15, height: 1.5, color: _darkText), textAlign: TextAlign.center),
+                    ),
+
+                  const SizedBox(height: 20),
+
+                  // --- TAGS ---
+                  if (lookingFor.isNotEmpty)
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      alignment: WrapAlignment.center,
+                      children: lookingFor.map((tag) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: _creamyOrange.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                        child: Text(tag, style: TextStyle(color: _creamyOrange, fontWeight: FontWeight.w700, fontSize: 13)),
+                      )).toList(),
+                    ),
+
+                  const SizedBox(height: 30),
+                  
+                  // Titre Section Posts
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text("${_userPosts.length} Publications", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _darkText))
+                  ),
+                  const SizedBox(height: 15),
+
+                  // --- LISTE DES POSTS ---
+                  if (_userPosts.isEmpty)
+                    Center(child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text("Aucune publication pour l'instant.", style: TextStyle(color: Colors.grey.shade500)),
+                    ))
+                  else
+                    ..._userPosts.map((post) {
+                      final timeAgo = _formatDate(post['created_at']);
+                      return _buildProfilePostCard(post, firstName, timeAgo);
+                    }),
+                ],
               ),
-              child: Text(bio, style: const TextStyle(fontSize: 15, height: 1.4)),
             ),
 
-          const SizedBox(height: 15),
-
-          // --- TAGS (Looking For) ---
-          if (lookingFor.isNotEmpty)
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              alignment: WrapAlignment.center,
-              children: lookingFor.map((tag) => Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF6B00).withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(20),
+            // BOUTON RETOUR FLOTTANT (En haut à gauche)
+            Positioned(
+              top: 10,
+              left: 20,
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 10, offset: const Offset(0, 4))]
+                  ),
+                  child: Icon(Icons.arrow_back_rounded, color: _darkText, size: 24),
                 ),
-                child: Text(tag, style: const TextStyle(color: Color(0xFFE65100), fontWeight: FontWeight.bold, fontSize: 12)),
-              )).toList(),
+              ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
 
-          const SizedBox(height: 30),
-          const Divider(),
-          const SizedBox(height: 10),
-          
-          Text("${_userPosts.length} Publications", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 15),
-
-          // --- LISTE DES POSTS ---
-          if (_userPosts.isEmpty)
-            const Center(child: Padding(
-              padding: EdgeInsets.all(20),
-              child: Text("Aucune publication pour l'instant.", style: TextStyle(color: Colors.grey)),
-            ))
-          else
-            ..._userPosts.map((post) {
-              final timeAgo = _formatDate(post['created_at']);
-              final likesCount = (post['liked_by'] as List?)?.length ?? 0;
-              final myId = Supabase.instance.client.auth.currentUser?.id;
-              final isLiked = (post['liked_by'] as List?)?.contains(myId) ?? false;
-
-              return GestureDetector(
-                onTap: () {
-                   Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(post: post, userName: firstName, timeAgo: timeAgo)));
-                },
-                child: NoraPostCard(
-                  userName: firstName,
-                  avatarUrl: avatarUrl,
-                  timeAgo: timeAgo,
-                  content: post['content'] ?? "",
-                  likes: likesCount,
-                  comments: 0,
-                  isLiked: isLiked,
-                  onLike: () {}, // On désactive le like sur le profil des autres pour simplifier l'UI ici
-                  onShare: null, // Pas de partage ici
+  // --- CARTE POST MODERNE (Identique à ProfilePage) ---
+  Widget _buildProfilePostCard(Map<String, dynamic> post, String userName, String timeAgo) {
+    return GestureDetector(
+      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(post: post, userName: userName, timeAgo: timeAgo))),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(25),
+          boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 10, offset: const Offset(0, 4))],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (post['image_url'] != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(15),
+                  child: Container(
+                    height: 150,
+                    width: double.infinity,
+                    color: Colors.grey.shade100,
+                    child: Image.network(post['image_url'], fit: BoxFit.cover),
+                  ),
                 ),
-              );
-            }),
-        ],
+              ),
+              
+            Text(post['content'], maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, height: 1.5, color: _darkText)),
+            const SizedBox(height: 12),
+            
+            Row(
+              children: [
+                Icon(Icons.calendar_today_rounded, size: 14, color: _creamyOrange),
+                const SizedBox(width: 6),
+                Text(timeAgo, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade400)),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(color: _softGrey, shape: BoxShape.circle),
+                  child: Icon(Icons.arrow_forward_rounded, size: 14, color: _darkText),
+                )
+              ],
+            )
+          ],
+        ),
       ),
     );
   }

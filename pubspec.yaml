@@ -12,8 +12,11 @@ dependencies:
     sdk: flutter
   flutter_localizations:
     sdk: flutter
+    
+  # Tes packages
   image_picker: ^1.2.1
   supabase_flutter: ^2.8.0
+  lottie: ^3.1.0
 
 dev_dependencies:
   flutter_test:
@@ -22,3 +25,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  
+  # Déclaration des assets pour Lottie
+  assets:
+    - assets/animations/

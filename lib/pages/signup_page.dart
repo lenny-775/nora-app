@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'components.dart';
-import 'transition_page.dart'; 
+import 'package:lottie/lottie.dart'; 
+import 'home_page.dart'; 
 
 class SignupPage extends StatefulWidget {
   const SignupPage({super.key});
@@ -15,140 +15,210 @@ class _SignupPageState extends State<SignupPage> {
   int _currentPage = 0;
   bool _isLoading = false;
 
-  // Variables du formulaire
+  final Color _creamyOrange = const Color(0xFFFF914D);
+  final Color _darkText = const Color(0xFF2D3436);
+
   final _firstNameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _phoneController = TextEditingController();
   final _ageController = TextEditingController();
   
   String? _selectedCity;
   String? _selectedStatus;
-  
-  // MODIFICATION ICI : Une liste pour stocker plusieurs choix
   final List<String> _selectedGoals = []; 
 
-  // Listes d'options
   final List<String> _cities = ['Montréal', 'Québec', 'Toronto', 'Vancouver', 'Ottawa', 'Calgary', 'Edmonton', 'Winnipeg', 'Halifax', 'Victoria'];
   final List<String> _statusOptions = ['PVTiste', 'Expatrié', 'Étudiant', 'Touriste', 'Local'];
-  
   final List<String> _goals = [
-    '👋 Rencontrer du monde',
-    '💼 Trouver un job',
-    '🏠 Trouver un logement',
-    '🍻 Boire des verres',
-    '📍 Découvrir la ville',
-    '🎨 Juste curieux'
+    '👋 Rencontrer du monde', '💼 Trouver un job', '🏠 Trouver un logement', 
+    '🍻 Boire des verres', '📍 Découvrir la ville', '🎨 Juste curieux'
   ];
 
-  // --- LOGIQUE DE NAVIGATION ---
+  // --- NOUVELLE FONCTION : POP-UP STYLÉE ---
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent, // Pour gérer nous-mêmes les arrondis
+        elevation: 0,
+        child: Container(
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(24),
+            boxShadow: [
+              BoxShadow(
+                color: _creamyOrange.withOpacity(0.2),
+                blurRadius: 20,
+                offset: const Offset(0, 10),
+              )
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min, // La fenêtre s'adapte au contenu
+            children: [
+              // Icône d'alerte stylée
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFF8F5), // Fond crème très clair
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.gpp_maybe_rounded, size: 36, color: _creamyOrange),
+              ),
+              const SizedBox(height: 20),
+              
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  color: _darkText,
+                ),
+              ),
+              const SizedBox(height: 10),
+              
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey.shade600,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 24),
+              
+              // Bouton pour fermer
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _creamyOrange,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                  ),
+                  child: const Text(
+                    "C'est noté !",
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- NAVIGATION (MODIFIÉE POUR VÉRIFIER LE MDP) ---
   void _nextPage() {
     FocusScope.of(context).unfocus();
-
-    if (_currentPage == 0) { // Identité
-      if (_firstNameController.text.isEmpty || _ageController.text.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Dis-nous comment tu t\'appelles !')));
-        return;
+    
+    // ÉTAPE 1 : Identité
+    if (_currentPage == 0) {
+      if (_firstNameController.text.isEmpty || _ageController.text.isEmpty) { 
+        _showSnack('Champs manquants'); return; 
       }
-    } else if (_currentPage == 1) { // Compte
-       if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Email et mot de passe requis')));
-        return;
-      }
-    } else if (_currentPage == 2) { // Ville & Statut
-      if (_selectedCity == null || _selectedStatus == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tout les champs sont obligatoires !')));
-        return;
-      }
-    } else if (_currentPage == 3) { // Goal (Dernière étape)
-      // On vérifie que la liste n'est pas vide
-      if (_selectedGoals.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choisis au moins une motivation !')));
-        return;
-      }
-      _signUpAndNavigate(); 
-      return;
+    } 
+    // ÉTAPE 2 : Compte (VÉRIFICATION SÉCURITÉ)
+    else if (_currentPage == 1) {
+       // 1. Vérification si vide
+       if (_emailController.text.isEmpty || _passwordController.text.isEmpty || _phoneController.text.isEmpty) { 
+         _showSnack('Tout est requis'); return; 
+       }
+       
+       // 2. Vérification longueur mot de passe
+       if (_passwordController.text.length < 8) {
+         _showErrorDialog(
+           "Mot de passe trop court", 
+           "Pour ta sécurité, ton mot de passe doit contenir au moins 8 caractères."
+         );
+         return; // On bloque ici
+       }
+    } 
+    // ÉTAPE 3 : Localisation
+    else if (_currentPage == 2) {
+      if (_selectedCity == null || _selectedStatus == null) { _showSnack('Dis-nous en plus !'); return; }
+    } 
+    // ÉTAPE 4 : Objectifs
+    else if (_currentPage == 3) {
+      if (_selectedGoals.isEmpty) { _showSnack('Choisis un objectif'); return; }
+      _signUpAndNavigate(); return;
     }
 
-    _pageController.nextPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+    _pageController.nextPage(duration: const Duration(milliseconds: 500), curve: Curves.easeInOutQuart);
     setState(() => _currentPage++);
   }
 
   void _previousPage() {
     FocusScope.of(context).unfocus();
-    if (_currentPage == 0) {
-      Navigator.pop(context);
-    } else {
-      _pageController.previousPage(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut);
+    if (_currentPage == 0) Navigator.pop(context);
+    else {
+      _pageController.previousPage(duration: const Duration(milliseconds: 500), curve: Curves.easeInOutQuart);
       setState(() => _currentPage--);
     }
   }
 
-  // --- LOGIQUE D'INSCRIPTION ---
+  void _showSnack(String msg) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.redAccent, behavior: SnackBarBehavior.floating));
+
   Future<void> _signUpAndNavigate() async {
     setState(() => _isLoading = true);
-    
     try {
       final AuthResponse res = await Supabase.instance.client.auth.signUp(
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
-        data: {'first_name': _firstNameController.text.trim(), 'city': _selectedCity},
+        data: {'first_name': _firstNameController.text.trim(), 'city': _selectedCity, 'phone': _phoneController.text.trim()},
       );
-      
       if (res.user != null) {
-        // On transforme la liste ["Job", "Potes"] en une seule phrase "Job, Potes"
-        final goalsString = _selectedGoals.join(', ');
-
         await Supabase.instance.client.from('profiles').upsert({
           'id': res.user!.id,
           'first_name': _firstNameController.text.trim(),
           'age': int.tryParse(_ageController.text.trim()) ?? 18,
           'city': _selectedCity,
           'status': _selectedStatus,
-          'looking_for': goalsString, // <--- On sauvegarde la version texte combinée
-          'avatar_url': "https://api.dicebear.com/9.x/initials/png?seed=${_firstNameController.text}&backgroundColor=FF6B00&textColor=ffffff",
+          'phone': _phoneController.text.trim(),
+          'looking_for': _selectedGoals.join(', '),
+          'avatar_url': "https://api.dicebear.com/9.x/initials/png?seed=${_firstNameController.text}&backgroundColor=FF914D&textColor=ffffff",
           'updated_at': DateTime.now().toIso8601String(),
         });
-        
-        if (mounted) {
-           Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => TransitionPage(userName: _firstNameController.text.trim())
-            ),
-          );
-        }
+        if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => GroupJoinPage(userCity: _selectedCity!)));
       }
     } catch (e) {
       setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Oups: $e")));
-      }
+      if (mounted) _showSnack("Erreur: $e");
     }
   }
 
-  // --- INTERFACE ---
+  // --- UI COMPONENTS ---
 
   Widget _buildHeader() {
+    double progress = (_currentPage + 1) / 4;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      child: Column(
+      child: Row(
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(icon: const Icon(Icons.arrow_back), onPressed: _previousPage),
-              Text("Étape ${_currentPage + 1}/4", style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
-              const SizedBox(width: 48), 
-            ],
+          IconButton(
+            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 22),
+            onPressed: _previousPage,
+            color: _darkText,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
           ),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: LinearProgressIndicator(
-              value: (_currentPage + 1) / 4,
-              backgroundColor: Colors.grey.shade200,
-              color: const Color(0xFFFF6B00),
-              minHeight: 6,
+          const SizedBox(width: 15),
+          Expanded(
+            child: TweenAnimationBuilder<double>(
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeOutCubic,
+              tween: Tween<double>(begin: 0, end: progress),
+              builder: (context, value, _) => ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: LinearProgressIndicator(value: value, backgroundColor: Colors.grey.shade200, color: _creamyOrange, minHeight: 8),
+              ),
             ),
           ),
         ],
@@ -156,122 +226,207 @@ class _SignupPageState extends State<SignupPage> {
     );
   }
 
-  Widget _buildStep1_Identity() {
-    return ListView(
-      padding: const EdgeInsets.all(30),
+  Widget _buildPageTitle(String title, String subtitle, IconData icon) {
+    return Column(
       children: [
+        Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(color: _creamyOrange.withOpacity(0.1), shape: BoxShape.circle),
+          child: Icon(icon, size: 40, color: _creamyOrange),
+        ),
         const SizedBox(height: 20),
-        const Center(child: Icon(Icons.location_on, size: 40, color: Color(0xFFFF6B00))),
+        Text(title, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText), textAlign: TextAlign.center),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 30),
+          child: Text(subtitle, style: TextStyle(fontSize: 16, color: Colors.grey.shade600, height: 1.4), textAlign: TextAlign.center),
+        ),
         const SizedBox(height: 40),
-        const Text("Comment tu t'appelles ?", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF2D3436))),
-        const SizedBox(height: 10),
-        const Text("Ton identité sur NORA.", style: TextStyle(fontSize: 16, color: Colors.grey)),
-        const SizedBox(height: 40),
-        NoraTextField(controller: _firstNameController, hintText: "Ton prénom", icon: Icons.person_outline),
-        NoraTextField(controller: _ageController, hintText: "Ton âge", icon: Icons.cake_outlined, isNumber: true),
       ],
+    );
+  }
+
+  Widget _buildPillField({required TextEditingController controller, required String hint, required IconData icon, bool isNumber = false, bool isPassword = false}) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: Colors.grey.shade200.withOpacity(0.5), blurRadius: 15, offset: const Offset(0, 5))]),
+      child: TextField(
+        controller: controller, obscureText: isPassword, keyboardType: isNumber ? TextInputType.number : TextInputType.text,
+        decoration: InputDecoration(
+          hintText: hint, hintStyle: TextStyle(color: Colors.grey.shade400),
+          prefixIcon: Padding(padding: const EdgeInsets.only(left: 10), child: Icon(icon, color: Colors.grey.shade400, size: 22)),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+          filled: true, fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide(color: _creamyOrange, width: 1.5)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPillDropdown({required String? value, required String hint, required IconData icon, required List<String> items, required Function(String?) onChanged}) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30), 
+        boxShadow: [BoxShadow(color: Colors.grey.shade200.withOpacity(0.5), blurRadius: 15, offset: const Offset(0, 5))],
+      ),
+      child: DropdownButtonFormField<String>(
+        value: value,
+        icon: Icon(Icons.keyboard_arrow_down_rounded, color: Colors.grey.shade400),
+        isExpanded: true,
+        style: TextStyle(color: _darkText, fontWeight: FontWeight.w600, fontSize: 16, fontFamily: 'Avenir'),
+        dropdownColor: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(color: Colors.grey.shade400),
+          prefixIcon: Padding(padding: const EdgeInsets.only(left: 10), child: Icon(icon, color: Colors.grey.shade400, size: 22)),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide.none),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(30), borderSide: BorderSide(color: _creamyOrange, width: 1.5)),
+          filled: true,
+          fillColor: Colors.white,
+          contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20),
+        ),
+        items: items.map((item) => DropdownMenuItem(value: item, child: Text(item))).toList(),
+        onChanged: onChanged,
+      ),
+    );
+  }
+
+  // --- PAGES CENTRÉES ET REMPLIES ---
+
+  Widget _buildStep1_Identity() {
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(height: 180, child: Lottie.asset('assets/animations/hello.json', fit: BoxFit.contain)),
+            const SizedBox(height: 20),
+            Text("Enchanté !", style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText), textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 30), child: Text("On commence par les présentations. Qui es-tu ?", style: TextStyle(fontSize: 16, color: Colors.grey.shade600, height: 1.4), textAlign: TextAlign.center)),
+            const SizedBox(height: 40),
+            _buildPillField(controller: _firstNameController, hint: "Ton prénom", icon: Icons.person_outline_rounded),
+            _buildPillField(controller: _ageController, hint: "Ton âge", icon: Icons.cake_outlined, isNumber: true),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildStep2_Account() {
-    return ListView(
-      padding: const EdgeInsets.all(30),
-      children: [
-        const Text("Sécurise ton compte", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF2D3436))),
-        const SizedBox(height: 40),
-        NoraTextField(controller: _emailController, hintText: "Ton adresse email", icon: Icons.email_outlined),
-        NoraTextField(controller: _passwordController, hintText: "Mot de passe", icon: Icons.lock_outline, obscureText: true),
-      ],
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            SizedBox(height: 180, child: Lottie.asset('assets/animations/login.json', fit: BoxFit.contain)),
+            const SizedBox(height: 20),
+            Text("Sécurité", style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText), textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 30), child: Text("Crée tes identifiants pour sécuriser ton compte.", style: TextStyle(fontSize: 16, color: Colors.grey.shade600, height: 1.4), textAlign: TextAlign.center)),
+            const SizedBox(height: 40),
+            _buildPillField(controller: _emailController, hint: "Ton email", icon: Icons.email_outlined),
+            _buildPillField(controller: _phoneController, hint: "Ton téléphone", icon: Icons.phone_android_rounded, isNumber: true),
+            _buildPillField(controller: _passwordController, hint: "Mot de passe", icon: Icons.lock_outline_rounded, isPassword: true),
+          ],
+        ),
+      ),
     );
   }
 
   Widget _buildStep3_Details() {
-    return ListView(
-      padding: const EdgeInsets.all(30),
-      children: [
-        const Text("Ton Aventure", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF2D3436))),
-        const SizedBox(height: 10),
-        const Text("Dis-nous où tu es.", style: TextStyle(fontSize: 16, color: Colors.grey)),
-        const SizedBox(height: 30),
-
-        DropdownButtonFormField(
-          value: _selectedCity,
-          decoration: InputDecoration(filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none), prefixIcon: const Icon(Icons.location_city, color: Colors.grey)),
-          items: _cities.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-          onChanged: (v) => setState(() => _selectedCity = v as String?),
-          hint: const Text("Quelle ville ?"),
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            SizedBox(height: 180, child: Lottie.asset('assets/animations/paperplane.json', fit: BoxFit.contain)),
+            const SizedBox(height: 20),
+            Text("Localisation", style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText), textAlign: TextAlign.center),
+            const SizedBox(height: 8),
+            Padding(padding: const EdgeInsets.symmetric(horizontal: 30), child: Text("Où se passe ton aventure actuellement ?", style: TextStyle(fontSize: 16, color: Colors.grey.shade600, height: 1.4), textAlign: TextAlign.center)),
+            const SizedBox(height: 40),
+            _buildPillDropdown(value: _selectedCity, hint: "Quelle ville ?", icon: Icons.location_city_rounded, items: _cities, onChanged: (v) => setState(() => _selectedCity = v)),
+            _buildPillDropdown(value: _selectedStatus, hint: "Ton statut", icon: Icons.badge_outlined, items: _statusOptions, onChanged: (v) => setState(() => _selectedStatus = v)),
+          ],
         ),
-        const SizedBox(height: 15),
-        DropdownButtonFormField(
-          value: _selectedStatus,
-          decoration: InputDecoration(filled: true, fillColor: Colors.white, border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none), prefixIcon: const Icon(Icons.badge, color: Colors.grey)),
-          items: _statusOptions.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
-          onChanged: (v) => setState(() => _selectedStatus = v as String?),
-          hint: const Text("Ton statut (Ex: PVTiste)"),
-        ),
-      ],
+      ),
     );
   }
 
-  // VERSION MULTI-SELECT
   Widget _buildStep4_Goals() {
-    return ListView(
-      padding: const EdgeInsets.all(30),
-      children: [
-        const Text("Que recherches-tu ?", style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Color(0xFF2D3436))),
-        const SizedBox(height: 10),
-        const Text("Sélectionne tout ce qui t'intéresse (plusieurs choix possibles).", style: TextStyle(fontSize: 16, color: Colors.grey)),
-        const SizedBox(height: 30),
-
-        ..._goals.map((goal) {
-          // On regarde si c'est DANS la liste
-          final isSelected = _selectedGoals.contains(goal);
-          
-          return GestureDetector(
-            onTap: () {
-              setState(() {
-                if (isSelected) {
-                  _selectedGoals.remove(goal); // On décoche
-                } else {
-                  _selectedGoals.add(goal); // On coche
-                }
-              });
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              margin: const EdgeInsets.only(bottom: 12),
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFFFF6B00).withOpacity(0.1) : Colors.white,
-                borderRadius: BorderRadius.circular(15),
-                border: Border.all(
-                  color: isSelected ? const Color(0xFFFF6B00) : Colors.transparent,
-                  width: 2
-                ),
-                boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 5, offset: const Offset(0, 2))],
-              ),
-              child: Row(
-                children: [
-                  Expanded(child: Text(goal, style: TextStyle(fontSize: 16, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: const Color(0xFF2D3436)))),
-                  
-                  // On change l'icône : Rond vide ou Rond coché
-                  Icon(
-                    isSelected ? Icons.check_circle : Icons.circle_outlined,
-                    color: isSelected ? const Color(0xFFFF6B00) : Colors.grey.shade300,
-                  ),
-                ],
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          children: [
+            const SizedBox(height: 20), 
+            Text(
+              "Tes Objectifs", 
+              style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText), 
+              textAlign: TextAlign.center
+            ),
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 30),
+              child: Text(
+                "Dis-nous ce qui t'amène ici.", 
+                style: TextStyle(fontSize: 16, color: Colors.grey.shade600, height: 1.4), 
+                textAlign: TextAlign.center
               ),
             ),
-          );
-        }).toList(),
-      ],
+            const SizedBox(height: 40),
+            ..._goals.map((goal) {
+              final isSelected = _selectedGoals.contains(goal);
+              return GestureDetector(
+                onTap: () => setState(() => isSelected ? _selectedGoals.remove(goal) : _selectedGoals.add(goal)),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                  decoration: BoxDecoration(
+                    color: isSelected ? _creamyOrange : Colors.white,
+                    borderRadius: BorderRadius.circular(30),
+                    boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 5, offset: const Offset(0, 2))],
+                    border: Border.all(color: isSelected ? _creamyOrange : Colors.transparent),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          goal, 
+                          style: TextStyle(
+                            fontSize: 16, 
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                            color: isSelected ? Colors.white : _darkText
+                          )
+                        )
+                      ),
+                      Icon(
+                        isSelected ? Icons.check_circle : Icons.circle_outlined, 
+                        color: isSelected ? Colors.white : Colors.grey.shade300
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ],
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8F5), 
+      backgroundColor: const Color(0xFFFFF8F5),
       body: SafeArea(
         child: Column(
           children: [
@@ -284,18 +439,61 @@ class _SignupPageState extends State<SignupPage> {
                   _buildStep1_Identity(),
                   _buildStep2_Account(),
                   _buildStep3_Details(),
-                  _buildStep4_Goals(),
+                  _buildStep4_Goals(), 
                 ],
               ),
             ),
             Padding(
-              padding: const EdgeInsets.all(30),
-              child: NoraButton(
-                text: _currentPage == 3 ? "Valider et Commencer 🚀" : "Continuer",
-                isLoading: _isLoading,
-                onPressed: _nextPage,
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+              child: SizedBox(
+                width: double.infinity, height: 55,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _nextPage,
+                  style: ElevatedButton.styleFrom(backgroundColor: _creamyOrange, foregroundColor: Colors.white, elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30))),
+                  child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : Text(_currentPage == 3 ? "C'est parti ! 🚀" : "Continuer", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class GroupJoinPage extends StatefulWidget {
+  final String userCity;
+  const GroupJoinPage({super.key, required this.userCity});
+  @override
+  State<GroupJoinPage> createState() => _GroupJoinPageState();
+}
+
+class _GroupJoinPageState extends State<GroupJoinPage> {
+  bool _joining = false;
+  final Color _creamyOrange = const Color(0xFFFF914D);
+  Future<void> _joinCityGroup() async {
+    setState(() => _joining = true);
+    await Future.delayed(const Duration(seconds: 1));
+    if (mounted) Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const HomePage()), (route) => false);
+  }
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFFF8F5),
+      body: Padding(
+        padding: const EdgeInsets.all(30.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.groups_rounded, size: 100, color: _creamyOrange),
+            const SizedBox(height: 20),
+            Text("Bienvenue à ${widget.userCity} !", style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, color: Color(0xFF2D3436)), textAlign: TextAlign.center),
+            const SizedBox(height: 15),
+            Text("Rejoins le groupe de ta ville pour rencontrer les autres membres.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade600, fontSize: 16, height: 1.5)),
+            const SizedBox(height: 50),
+            SizedBox(width: double.infinity, height: 55, child: ElevatedButton(onPressed: _joining ? null : _joinCityGroup, style: ElevatedButton.styleFrom(backgroundColor: _creamyOrange, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30))), child: _joining ? const CircularProgressIndicator(color: Colors.white) : const Text("Rejoindre le groupe", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)))),
+            const SizedBox(height: 20),
+            TextButton(onPressed: () => Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const HomePage()), (r) => false), child: Text("Passer pour le moment", style: TextStyle(color: Colors.grey.shade500)))
           ],
         ),
       ),

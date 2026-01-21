@@ -56,12 +56,11 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
             children: [
               const Spacer(flex: 1), 
               
-              // --- C'EST ICI QUE ÇA SE JOUE (VERSION LOCALE) ---
               SizedBox(
                 height: 250, 
                 width: double.infinity,
                 child: Lottie.asset(
-                  'assets/animations/community.json', // Utilise ton fichier local
+                  'assets/animations/community.json', 
                   controller: _controller,
                   fit: BoxFit.contain,
                   onLoaded: (composition) {
@@ -70,7 +69,6 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
                       ..forward(); 
                   },
                   errorBuilder: (context, error, stackTrace) {
-                    // Petite sécurité : si ça charge pas, icône orange
                     return const Center(child: Icon(Icons.people, size: 80, color: Colors.orange));
                   },
                 ),
@@ -78,7 +76,6 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
               
               const SizedBox(height: 20),
 
-              // 2. LE LOGO
               Column(
                 children: [
                   const Text(
@@ -93,11 +90,19 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
                   ),
                   const SizedBox(height: 8),
                   
+                  // --- CORRECTION DÉFINITIVE LOGO (Départ sécurisé) ---
                   Hero(
                     tag: 'nora-logo-hero', 
                     child: Material(
-                      type: MaterialType.transparency,
-                      child: const NoraLogo(size: 55),
+                      color: Colors.transparent, 
+                      child: SizedBox(
+                        height: 55, // Hauteur voulue
+                        width: 180, // Largeur de sécurité
+                        child: FittedBox(
+                          fit: BoxFit.contain,
+                          child: const NoraLogo(size: 55),
+                        ),
+                      ),
                     ),
                   ),
                 ],
@@ -113,7 +118,6 @@ class _WelcomePageState extends State<WelcomePage> with SingleTickerProviderStat
 
               const Spacer(flex: 2), 
 
-              // 3. BOUTONS
               _buildPillButton(
                 text: "Continuer avec Email",
                 icon: Icons.mail_outline,

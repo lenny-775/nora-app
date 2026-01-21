@@ -1,6 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../widgets/nora_logo.dart'; // Import du logo
 import 'chat_page.dart';
 import 'community_chat_page.dart';
 import 'search_page.dart';
@@ -16,7 +17,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
   final User? user = Supabase.instance.client.auth.currentUser;
   int _currentTabIndex = 0; // 0 = Privé, 1 = Groupes
 
-  // COULEURS DESIGN SYSTEM
+  // COULEURS V3
   final Color _creamyOrange = const Color(0xFFFF914D);
   final Color _darkText = const Color(0xFF2D3436);
   final Color _backgroundColor = const Color(0xFFFFF8F5);
@@ -34,57 +35,113 @@ class _ConversationsPageState extends State<ConversationsPage> {
   // --- 1. CRÉATION GROUPE ---
   void _showCreateGroupDialog() {
     final nameController = TextEditingController();
-    final descController = TextEditingController();
-    
+    String selectedPrivacy = 'public';
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text("Créer un groupe", style: TextStyle(fontWeight: FontWeight.bold, color: _darkText)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              title: Text("Nouveau Groupe", style: TextStyle(fontWeight: FontWeight.w900, color: _darkText)),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController, 
+                    decoration: InputDecoration(
+                      hintText: "Nom du groupe", 
+                      filled: true, 
+                      fillColor: _softGrey, 
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none)
+                    )
+                  ),
+                  const SizedBox(height: 20),
+                  Align(alignment: Alignment.centerLeft, child: Text("Type d'accès", style: TextStyle(fontWeight: FontWeight.bold, color: Colors.grey.shade600, fontSize: 13))),
+                  const SizedBox(height: 10),
+                  
+                  _buildRadioOption("Public", "Tout le monde peut rejoindre", 'public', selectedPrivacy, (val) => setDialogState(() => selectedPrivacy = val)),
+                  _buildRadioOption("Sur invitation", "Visible mais fermé", 'invite', selectedPrivacy, (val) => setDialogState(() => selectedPrivacy = val)),
+                  _buildRadioOption("Privé", "Secret (invisible)", 'private', selectedPrivacy, (val) => setDialogState(() => selectedPrivacy = val)),
+                ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text("Annuler", style: TextStyle(color: Colors.grey))),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: _creamyOrange, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), elevation: 0),
+                  onPressed: () async {
+                    if (nameController.text.isNotEmpty && user != null) {
+                      try {
+                        final res = await Supabase.instance.client.from('groups').insert({
+                          'name': nameController.text.trim(),
+                          'privacy': selectedPrivacy,
+                          'creator_id': user!.id, 
+                        }).select().single();
+                        
+                        await Supabase.instance.client.from('group_members').insert({
+                          'group_id': res['id'], 'user_id': user!.id
+                        });
+
+                        if (mounted) { Navigator.pop(context); setState(() {}); }
+                      } catch (e) {
+                        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: $e")));
+                      }
+                    }
+                  },
+                  child: const Text("Créer", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                )
+              ],
+            );
+          }
+        );
+      },
+    );
+  }
+
+  Widget _buildRadioOption(String title, String subtitle, String value, String groupValue, Function(String) onChanged) {
+    bool isSelected = value == groupValue;
+    return GestureDetector(
+      onTap: () => onChanged(value),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? _creamyOrange.withOpacity(0.1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isSelected ? _creamyOrange : Colors.transparent)
+        ),
+        child: Row(
           children: [
-            TextField(controller: nameController, decoration: InputDecoration(hintText: "Nom (ex: Chill à Montréal)", filled: true, fillColor: _softGrey, border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none))),
-            const SizedBox(height: 10),
-            TextField(controller: descController, decoration: InputDecoration(hintText: "Description (facultatif)", filled: true, fillColor: _softGrey, border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none))),
+            Icon(isSelected ? Icons.radio_button_checked : Icons.radio_button_off, color: isSelected ? _creamyOrange : Colors.grey.shade400, size: 20),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(fontWeight: FontWeight.bold, color: _darkText, fontSize: 14)),
+                Text(subtitle, style: TextStyle(color: Colors.grey.shade500, fontSize: 11)),
+              ],
+            )
           ],
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Annuler", style: TextStyle(color: Colors.grey))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: _creamyOrange, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
-            onPressed: () async {
-              if (nameController.text.isNotEmpty && user != null) {
-                try {
-                  final res = await Supabase.instance.client.from('communities').insert({
-                    'name': nameController.text.trim(),
-                    'description': descController.text.trim(),
-                    'city': 'Monde', 
-                  }).select().single();
-                  
-                  await Supabase.instance.client.from('community_members').insert({
-                    'community_id': res['id'], 'user_id': user!.id
-                  });
-
-                  if (mounted) {
-                    Navigator.pop(context); 
-                    Navigator.pop(context); 
-                    setState(() {}); 
-                  }
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: $e")));
-                }
-              }
-            },
-            child: const Text("Créer", style: TextStyle(color: Colors.white)),
-          )
-        ],
       ),
     );
   }
 
-  // --- 2. MENU "+" (MODERNE) ---
+  // --- REJOINDRE GROUPE ---
+  Future<void> _joinGroup(int groupId, String groupName) async {
+    try {
+      await Supabase.instance.client.from('group_members').insert({'group_id': groupId, 'user_id': user!.id});
+      if (mounted) {
+        Navigator.pop(context); 
+        setState(() {}); 
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Tu as rejoint \"$groupName\" !")));
+      }
+    } catch (e) { if(mounted) Navigator.pop(context); }
+  }
+
+  // --- MENU "+" ---
   void _showAddMenu() {
     showModalBottomSheet(
       context: context,
@@ -92,40 +149,17 @@ class _ConversationsPageState extends State<ConversationsPage> {
       builder: (context) {
         return Container(
           padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-          ),
+          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
               const SizedBox(height: 20),
-              
               Text("Nouvelle discussion", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _darkText)),
               const SizedBox(height: 20),
-
-              _buildMenuOption(
-                icon: Icons.person_rounded, 
-                title: "Message Privé", 
-                subtitle: "Discuter avec un autre membre",
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage()));
-                }
-              ),
-              
+              _buildMenuOption(Icons.person_rounded, "Message Privé", "Discuter avec un membre", () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => const SearchPage())); }),
               const SizedBox(height: 15),
-
-              _buildMenuOption(
-                icon: Icons.groups_rounded, 
-                title: "Communauté / Groupe", 
-                subtitle: "Rejoindre ou créer un groupe",
-                onTap: () {
-                  Navigator.pop(context);
-                  _showGroupSelectionSheet();
-                }
-              ),
+              _buildMenuOption(Icons.groups_rounded, "Groupe", "Rejoindre ou créer", () { Navigator.pop(context); _showGroupSelectionSheet(); }),
               const SizedBox(height: 20),
             ],
           ),
@@ -134,32 +168,17 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  Widget _buildMenuOption({required IconData icon, required String title, required String subtitle, required VoidCallback onTap}) {
+  Widget _buildMenuOption(IconData icon, String title, String subtitle, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          color: _softGrey,
-          borderRadius: BorderRadius.circular(20),
-        ),
+        decoration: BoxDecoration(color: _softGrey, borderRadius: BorderRadius.circular(20)),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-              child: Icon(icon, color: _creamyOrange),
-            ),
+            Container(padding: const EdgeInsets.all(12), decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: Icon(icon, color: _creamyOrange)),
             const SizedBox(width: 15),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _darkText)),
-                  Text(subtitle, style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
-                ],
-              ),
-            ),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _darkText)), Text(subtitle, style: TextStyle(color: Colors.grey.shade500, fontSize: 13))])),
             Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey.shade400)
           ],
         ),
@@ -167,98 +186,72 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  // --- 3. SÉLECTION GROUPE ---
+  // --- SÉLECTION / REJOINDRE GROUPE (AVEC AUTO-CRÉATION DES VILLES) ---
   void _showGroupSelectionSheet() {
-    final cities = ['Montréal', 'Québec', 'Toronto', 'Vancouver', 'Ottawa'];
-    
+    final defaultCities = ['PVTistes Montréal', 'PVTistes Québec', 'PVTistes Toronto', 'PVTistes Vancouver', 'PVTistes Ottawa'];
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) {
         return DraggableScrollableSheet(
-          initialChildSize: 0.7,
-          minChildSize: 0.5,
-          maxChildSize: 0.9,
+          initialChildSize: 0.85, minChildSize: 0.5, maxChildSize: 0.95,
           builder: (context, scrollController) {
             return Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-              ),
+              decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
               padding: const EdgeInsets.all(24),
               child: Column(
                 children: [
                   Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2))),
                   const SizedBox(height: 20),
-                  Text("Rejoindre un groupe", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _darkText)),
+                  Text("Rejoindre un groupe", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _darkText)),
                   const SizedBox(height: 20),
                   
-                  // Créer Nouveau
                   GestureDetector(
-                    onTap: () {
-                       Navigator.pop(context);
-                       _showCreateGroupDialog();
-                    },
+                    onTap: _showCreateGroupDialog,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: _creamyOrange, width: 1.5),
-                        borderRadius: BorderRadius.circular(20)
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.add_rounded, color: _creamyOrange),
-                          const SizedBox(width: 10),
-                          Text("Créer mon propre groupe", style: TextStyle(color: _creamyOrange, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(border: Border.all(color: _creamyOrange, width: 1.5), borderRadius: BorderRadius.circular(25)),
+                      child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_rounded, color: _creamyOrange), const SizedBox(width: 10), Text("Créer mon propre groupe", style: TextStyle(color: _creamyOrange, fontWeight: FontWeight.bold, fontSize: 16))]),
                     ),
                   ),
                   
-                  const SizedBox(height: 20),
-                  Align(alignment: Alignment.centerLeft, child: Text("Populaires", style: TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.bold))),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 30),
+                  Align(alignment: Alignment.centerLeft, child: Text("Populaires", style: TextStyle(color: Colors.grey.shade500, fontWeight: FontWeight.bold, fontSize: 14))),
+                  const SizedBox(height: 15),
 
                   Expanded(
-                    child: ListView.separated(
-                      controller: scrollController,
-                      itemCount: cities.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        return Container(
-                          decoration: BoxDecoration(color: _softGrey, borderRadius: BorderRadius.circular(15)),
-                          child: ListTile(
-                            leading: Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                              child: Icon(Icons.location_city_rounded, color: _creamyOrange, size: 20),
-                            ),
-                            title: Text("PVTistes ${cities[index]}", style: TextStyle(fontWeight: FontWeight.bold, color: _darkText)),
-                            trailing: ElevatedButton(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _darkText, 
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 0)
+                    child: FutureBuilder<List<Map<String, dynamic>>>(
+                      // On charge les groupes publics. S'ils n'existent pas, on pourra les créer ici (logique simplifiée)
+                      future: _fetchPublicGroups(defaultCities), 
+                      builder: (context, snapshot) {
+                        if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: _creamyOrange));
+                        final publicGroups = snapshot.data!;
+
+                        return ListView.separated(
+                          controller: scrollController,
+                          itemCount: publicGroups.length,
+                          separatorBuilder: (_, __) => const SizedBox(height: 12),
+                          itemBuilder: (context, index) {
+                            final group = publicGroups[index];
+                            return Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              decoration: BoxDecoration(color: _softGrey, borderRadius: BorderRadius.circular(20)),
+                              child: Row(
+                                children: [
+                                  Container(padding: const EdgeInsets.all(10), decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: Icon(Icons.groups_2_rounded, color: _creamyOrange, size: 22)),
+                                  const SizedBox(width: 15),
+                                  Expanded(child: Text(group['name'], style: TextStyle(fontWeight: FontWeight.bold, color: _darkText, fontSize: 16))),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(backgroundColor: _darkText, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), elevation: 0),
+                                    onPressed: () => _joinGroup(group['id'], group['name']),
+                                    child: const Text("Rejoindre", style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
                               ),
-                              onPressed: () async {
-                                final comm = await Supabase.instance.client.from('communities').select().ilike('name', '%${cities[index]}%').maybeSingle();
-                                if (comm != null && user != null) {
-                                  try {
-                                    await Supabase.instance.client.from('community_members').insert({'community_id': comm['id'], 'user_id': user!.id});
-                                    if (mounted) {
-                                      Navigator.pop(context);
-                                      setState(() {});
-                                    }
-                                  } catch (e) {
-                                    if (mounted) Navigator.pop(context);
-                                  }
-                                }
-                              },
-                              child: const Text("Rejoindre", style: TextStyle(fontSize: 12, color: Colors.white)),
-                            ),
-                          ),
+                            );
+                          },
                         );
                       },
                     ),
@@ -272,33 +265,55 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
+  // Fonction utilitaire pour récupérer (et créer si besoin) les groupes par défaut
+  Future<List<Map<String, dynamic>>> _fetchPublicGroups(List<String> defaults) async {
+    // 1. Récupérer les groupes publics existants
+    final existing = await Supabase.instance.client.from('groups').select().eq('privacy', 'public');
+    
+    // 2. Vérifier s'il manque des villes par défaut (Montréal, etc.)
+    // Note: Pour une vraie prod, on ferait ça via un script admin, mais ici c'est pratique pour tester
+    for (String cityName in defaults) {
+      if (!existing.any((g) => g['name'] == cityName)) {
+        try {
+          await Supabase.instance.client.from('groups').insert({
+            'name': cityName,
+            'privacy': 'public',
+            'creator_id': user!.id // Créé par l'utilisateur courant (admin système temporaire)
+          });
+        } catch (e) {
+          // Ignorer si erreur (déjà créé entre temps)
+        }
+      }
+    }
+    
+    // 3. Re-fetch final
+    return await Supabase.instance.client.from('groups').select().eq('privacy', 'public').order('created_at');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _backgroundColor,
       
-      // APP BAR AVEC LE BOUTON "+"
+      // --- APP BAR V3 (LOGO CENTRÉ) ---
       appBar: AppBar(
         backgroundColor: _backgroundColor,
         elevation: 0,
+        centerTitle: true,
         automaticallyImplyLeading: false,
-        title: Text("Messages", style: TextStyle(color: _darkText, fontWeight: FontWeight.w900, fontSize: 26)),
-        centerTitle: false,
+        title: Hero(
+          tag: 'nora-logo-hero',
+          child: Material(
+            color: Colors.transparent,
+            child: SizedBox(height: 35, width: 120, child: FittedBox(fit: BoxFit.contain, child: const NoraLogo(size: 35))),
+          ),
+        ),
         actions: [
-          // BOUTON AJOUTER QUI OUVRE LE MENU
           Padding(
-            padding: const EdgeInsets.only(right: 20),
-            child: GestureDetector(
-              onTap: _showAddMenu, // <-- LANCE LA FONCTION DU MENU
-              child: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 10, offset: const Offset(0, 4))]
-                ),
-                child: Icon(Icons.add_rounded, color: _creamyOrange, size: 28),
-              ),
+            padding: const EdgeInsets.only(right: 16),
+            child: IconButton(
+              icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.black, size: 28),
+              onPressed: _showAddMenu, 
             ),
           )
         ],
@@ -306,15 +321,12 @@ class _ConversationsPageState extends State<ConversationsPage> {
 
       body: Column(
         children: [
-          // --- 1. SEGMENTED CONTROL (SWITCH) ---
+          // --- SEGMENTED CONTROL ---
           Container(
-            margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+            margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
             padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(30),
-              boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 10)]
-            ),
+            height: 50,
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), border: Border.all(color: Colors.black, width: 0.6)), // Bordure fine V3
             child: Row(
               children: [
                 _buildSegmentButton(0, "Privé"),
@@ -323,14 +335,10 @@ class _ConversationsPageState extends State<ConversationsPage> {
             ),
           ),
 
-          // --- 2. LISTE ---
-          Expanded(
-            child: _currentTabIndex == 0 ? _buildPrivateChats() : _buildMyGroups(),
-          ),
+          // --- LISTE ---
+          Expanded(child: _currentTabIndex == 0 ? _buildPrivateChats() : _buildMyGroups()),
         ],
       ),
-      
-      // PLUS DE FLOATING ACTION BUTTON ICI !
     );
   }
 
@@ -341,19 +349,12 @@ class _ConversationsPageState extends State<ConversationsPage> {
         onTap: () => setState(() => _currentTabIndex = index),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
             color: isSelected ? _creamyOrange : Colors.transparent,
             borderRadius: BorderRadius.circular(25),
           ),
-          child: Text(
-            text, 
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontWeight: FontWeight.bold, 
-              color: isSelected ? Colors.white : Colors.grey.shade500
-            ),
-          ),
+          alignment: Alignment.center,
+          child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, color: isSelected ? Colors.white : Colors.grey.shade500, fontSize: 15)),
         ),
       ),
     );
@@ -367,21 +368,10 @@ class _ConversationsPageState extends State<ConversationsPage> {
         if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: _creamyOrange));
         final myConversations = snapshot.data!.where((c) => c['user1_id'] == user!.id || c['user2_id'] == user!.id).toList();
 
-        if (myConversations.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.chat_bubble_outline_rounded, size: 50, color: Colors.grey.shade300),
-                const SizedBox(height: 10),
-                Text("Aucune conversation", style: TextStyle(color: Colors.grey.shade500)),
-              ],
-            ),
-          );
-        }
+        if (myConversations.isEmpty) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.chat_bubble_outline_rounded, size: 50, color: Colors.grey.shade300), const SizedBox(height: 10), Text("Aucune conversation", style: TextStyle(color: Colors.grey.shade500))]));
 
         return ListView.builder(
-          padding: const EdgeInsets.only(top: 10, bottom: 80),
+          padding: const EdgeInsets.only(top: 5, bottom: 80),
           itemCount: myConversations.length,
           itemBuilder: (context, index) {
             final conversation = myConversations[index];
@@ -414,41 +404,27 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  // --- LISTE GROUPES ---
+  // --- LISTE MES GROUPES ---
   Widget _buildMyGroups() {
     return FutureBuilder<List<Map<String, dynamic>>>(
-      future: Supabase.instance.client
-          .from('community_members')
-          .select('community_id, communities(id, name, description, image_url)')
-          .eq('user_id', user!.id),
+      future: Supabase.instance.client.from('group_members').select('group_id, groups(id, name, privacy)').eq('user_id', user!.id),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: _creamyOrange));
         final memberships = snapshot.data!;
         
-        if (memberships.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.groups_rounded, size: 50, color: Colors.grey.shade300),
-                const SizedBox(height: 10),
-                Text("Aucun groupe rejoint", style: TextStyle(color: Colors.grey.shade500)),
-              ],
-            ),
-          );
-        }
+        if (memberships.isEmpty) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.groups_rounded, size: 50, color: Colors.grey.shade300), const SizedBox(height: 10), Text("Aucun groupe rejoint", style: TextStyle(color: Colors.grey.shade500))]));
 
         return ListView.builder(
-          padding: const EdgeInsets.only(top: 10, bottom: 80),
+          padding: const EdgeInsets.only(top: 5, bottom: 80),
           itemCount: memberships.length,
           itemBuilder: (context, index) {
-            final group = memberships[index]['communities'] as Map<String, dynamic>;
+            final groupData = memberships[index]['groups'] as Map<String, dynamic>;
             return _buildTile(
-              title: group['name'],
-              subtitle: group['description'] ?? "Groupe",
+              title: groupData['name'],
+              subtitle: groupData['privacy'] == 'public' ? "Public" : "Privé",
               isGroup: true,
-              img: group['image_url'],
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => CommunityChatPage(communityId: group['id'], communityName: group['name']))),
+              img: null, 
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => CommunityChatPage(communityId: groupData['id'], communityName: groupData['name']))),
             );
           },
         );
@@ -460,69 +436,20 @@ class _ConversationsPageState extends State<ConversationsPage> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8), // Marge comme sur le design
-        padding: const EdgeInsets.all(15),
-        decoration: BoxDecoration(
-          color: Colors.white, 
-          borderRadius: BorderRadius.circular(20), // Coins arrondis
-          boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 10, offset: const Offset(0, 4))]
-        ),
+        margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8), 
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.black, width: 0.6)), // Bordure V3
         child: Row(
           children: [
-            // AVATAR
-            Stack(
-              children: [
-                CircleAvatar(
-                  radius: 28, 
-                  backgroundColor: isGroup ? Colors.orange.shade50 : Colors.grey.shade200,
-                  backgroundImage: img != null ? NetworkImage(img) : null, 
-                  child: img == null ? Icon(isGroup ? Icons.groups_rounded : Icons.person_rounded, color: isGroup ? _creamyOrange : Colors.grey) : null
-                ),
-                if (unread > 0)
-                  Positioned(
-                    right: 0, top: 0,
-                    child: Container(
-                      width: 14, height: 14,
-                      decoration: BoxDecoration(color: _creamyOrange, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-                    ),
-                  )
-              ],
+            CircleAvatar(
+              radius: 26, 
+              backgroundColor: isGroup ? Colors.orange.shade50 : Colors.grey.shade200,
+              backgroundImage: img != null ? NetworkImage(img) : null, 
+              child: img == null ? Icon(isGroup ? Icons.groups_rounded : Icons.person_rounded, color: isGroup ? _creamyOrange : Colors.grey) : null
             ),
             const SizedBox(width: 15),
-            
-            // TEXTES
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _darkText)),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle, 
-                    maxLines: 1, 
-                    overflow: TextOverflow.ellipsis, 
-                    style: TextStyle(color: unread > 0 ? _darkText : Colors.grey.shade500, fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal)
-                  ),
-                ],
-              ),
-            ),
-            
-            // TEMPS & BADGE
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (time != null && time.isNotEmpty) 
-                  Text(time, style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontWeight: FontWeight.bold)),
-                if (unread > 0) ...[
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), 
-                    decoration: BoxDecoration(color: _creamyOrange, borderRadius: BorderRadius.circular(10)), 
-                    child: Text('$unread', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))
-                  )
-                ]
-              ],
-            ),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: _darkText)), const SizedBox(height: 4), Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: unread > 0 ? _darkText : Colors.grey.shade500, fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal))])),
+            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [if (time != null && time.isNotEmpty) Text(time, style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontWeight: FontWeight.bold)), if (unread > 0) ...[const SizedBox(height: 6), Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: _creamyOrange, borderRadius: BorderRadius.circular(10)), child: Text('$unread', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)))]]),
           ],
         ),
       ),

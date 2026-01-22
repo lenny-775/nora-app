@@ -1,10 +1,10 @@
 import 'dart:io';
-import 'dart:convert'; // Pour décoder la réponse de Mapbox
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:http/http.dart' as http; // Pour appeler Mapbox
-import 'package:flutter_typeahead/flutter_typeahead.dart'; // Pour la liste déroulante
+import 'package:http/http.dart' as http;
+import 'package:flutter_typeahead/flutter_typeahead.dart';
 
 class CreatePostPage extends StatefulWidget {
   final Map<String, dynamic>? postToEdit;
@@ -17,7 +17,7 @@ class CreatePostPage extends StatefulWidget {
 
 class _CreatePostPageState extends State<CreatePostPage> {
   final _contentController = TextEditingController();
-  final _addressController = TextEditingController(); // Sert pour l'affichage
+  final _addressController = TextEditingController(); 
   final _postalCodeController = TextEditingController();
   
   bool _isLoading = false;
@@ -28,11 +28,10 @@ class _CreatePostPageState extends State<CreatePostPage> {
   XFile? _newImageFile;
   String? _existingImageUrl;
 
-  // ✅ VARIABLES POUR LE GPS (Directement issues de la sélection)
   double? _selectedLat;
   double? _selectedLng;
 
-  // 🔑 TON TOKEN MAPBOX (C'est lui qui fait la magie)
+  // 🔑 TON TOKEN MAPBOX
   final String _mapboxAccessToken = 'pk.eyJ1IjoibGVubnk3NzUiLCJhIjoiY21rcGs2dzd0MGYwbDNrczkycGd5N3kydyJ9.p5OApkqxbLW6ZP3JriBoGw';
 
   final List<String> _cities = ['Montréal', 'Québec', 'Toronto', 'Vancouver', 'Ottawa', 'Calgary', 'Edmonton', 'Winnipeg', 'Halifax', 'Victoria'];
@@ -71,11 +70,10 @@ class _CreatePostPageState extends State<CreatePostPage> {
     }
   }
 
-  // 🔥 FONCTION MAGIQUE : Elle interroge Mapbox quand tu tapes
+  // 🔥 Autocomplétion Mapbox
   Future<List<Map<String, dynamic>>> _getAddressSuggestions(String query) async {
     if (query.isEmpty) return [];
     
-    // On limite la recherche au Canada (country=ca) pour éviter des résultats en France ou ailleurs
     final url = Uri.parse(
       'https://api.mapbox.com/geocoding/v5/mapbox.places/$query.json?access_token=$_mapboxAccessToken&country=ca&types=address,poi&limit=5'
     );
@@ -84,7 +82,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        // On transforme le JSON horrible en une liste propre
         return List<Map<String, dynamic>>.from(data['features']);
       }
     } catch (e) {
@@ -109,7 +106,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('L\'adresse est requise pour un logement.')));
         return;
       }
-      // On vérifie si on a bien le GPS (grâce à l'autocomplétion ou l'édition)
       if (_selectedLat == null || _selectedLng == null) {
          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sélectionne une adresse dans la liste déroulante pour qu'on puisse la localiser !"), backgroundColor: Colors.orange));
          return;
@@ -122,22 +118,15 @@ class _CreatePostPageState extends State<CreatePostPage> {
       final user = Supabase.instance.client.auth.currentUser;
       String? finalImageUrl = _existingImageUrl;
 
-      // 1. Upload Image
       if (_newImageFile != null) {
         final bytes = await _newImageFile!.readAsBytes();
         final fileExt = _newImageFile!.path.split('.').last;
         final fileName = '${user!.id}/${DateTime.now().millisecondsSinceEpoch}.$fileExt';
 
-        await Supabase.instance.client.storage
-            .from('posts')
-            .uploadBinary(fileName, bytes, fileOptions: FileOptions(contentType: _newImageFile!.mimeType));
-
-        finalImageUrl = Supabase.instance.client.storage
-            .from('posts')
-            .getPublicUrl(fileName);
+        await Supabase.instance.client.storage.from('posts').uploadBinary(fileName, bytes, fileOptions: FileOptions(contentType: _newImageFile!.mimeType));
+        finalImageUrl = Supabase.instance.client.storage.from('posts').getPublicUrl(fileName);
       }
 
-      // 2. Sauvegarde (On a déjà le GPS, pas besoin de le calculer !)
       final dataToSave = {
         'content': content,
         'city': _selectedCity,
@@ -145,7 +134,6 @@ class _CreatePostPageState extends State<CreatePostPage> {
         'image_url': finalImageUrl,
         'address': (_selectedCategory == '🏠 Logement') ? address : null,
         'postal_code': (_selectedCategory == '🏠 Logement') ? _postalCodeController.text : null,
-        // ✅ On utilise directement les coordonnées récupérées par l'autocomplétion
         'latitude': (_selectedCategory == '🏠 Logement') ? _selectedLat : null,
         'longitude': (_selectedCategory == '🏠 Logement') ? _selectedLng : null,
       };
@@ -256,7 +244,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
                 ),
                 child: TypeAheadField<Map<String, dynamic>>(
                   controller: _addressController,
-                  suggestionsCallback: _getAddressSuggestions, // Appelle Mapbox
+                  suggestionsCallback: _getAddressSuggestions,
                   builder: (context, controller, focusNode) {
                     return TextField(
                       controller: controller,
@@ -278,22 +266,13 @@ class _CreatePostPageState extends State<CreatePostPage> {
                     );
                   },
                   onSelected: (suggestion) {
-                    // ✅ C'est ici que la magie opère !
-                    _addressController.text = suggestion['place_name']; // Remplit le texte
-                    
-                    // On extrait le GPS donné par Mapbox
+                    _addressController.text = suggestion['place_name'];
                     List coords = suggestion['geometry']['coordinates']; // [long, lat]
                     setState(() {
                       _selectedLng = coords[0];
                       _selectedLat = coords[1];
                     });
-                    
-                    // Petit feedback visuel
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text("Adresse trouvée ! 📍"), 
-                      duration: const Duration(milliseconds: 800),
-                      backgroundColor: Colors.green
-                    ));
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Adresse trouvée ! 📍"), duration: const Duration(milliseconds: 800), backgroundColor: Colors.green));
                   },
                 ),
               ),
@@ -301,17 +280,7 @@ class _CreatePostPageState extends State<CreatePostPage> {
               Container(
                 margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: _creamyOrange.withOpacity(0.15), blurRadius: 15, offset: const Offset(0, 5))], border: Border.all(color: _creamyOrange.withOpacity(0.3), width: 1)),
-                child: TextField(
-                  controller: _postalCodeController, 
-                  style: TextStyle(color: _darkText, fontWeight: FontWeight.w600), 
-                  decoration: InputDecoration(
-                    hintText: "Complément (Appt, Code postal...)", 
-                    hintStyle: TextStyle(color: Colors.grey.shade400), 
-                    prefixIcon: Padding(padding: const EdgeInsets.only(left: 10), child: Icon(Icons.markunread_mailbox_rounded, color: _creamyOrange, size: 22)), 
-                    border: InputBorder.none, 
-                    contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20)
-                  )
-                ),
+                child: TextField(controller: _postalCodeController, style: TextStyle(color: _darkText, fontWeight: FontWeight.w600), decoration: InputDecoration(hintText: "Complément (Appt, Code postal...)", hintStyle: TextStyle(color: Colors.grey.shade400), prefixIcon: Padding(padding: const EdgeInsets.only(left: 10), child: Icon(Icons.markunread_mailbox_rounded, color: _creamyOrange, size: 22)), border: InputBorder.none, contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 20))),
               ),
             ],
 

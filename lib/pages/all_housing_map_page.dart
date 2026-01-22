@@ -5,10 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'post_details_page.dart'; 
 
 class AllHousingMapPage extends StatefulWidget {
-  // On accepte la ville en paramètre
   final String city; 
-
-  // Par défaut on met Montréal si rien n'est précisé
   const AllHousingMapPage({super.key, required this.city});
 
   @override
@@ -62,7 +59,7 @@ class _AllHousingMapPageState extends State<AllHousingMapPage> {
 
   @override
   Widget build(BuildContext context) {
-    // On récupère le centre selon la ville, sinon Montréal par défaut
+    // Centre selon la ville
     final LatLng startCenter = _cityCoordinates[widget.city] ?? const LatLng(45.5017, -73.5673);
 
     return Scaffold(
@@ -72,7 +69,7 @@ class _AllHousingMapPageState extends State<AllHousingMapPage> {
               children: [
                 FlutterMap(
                   options: MapOptions(
-                    initialCenter: startCenter, // ✅ La carte démarre sur la bonne ville !
+                    initialCenter: startCenter,
                     initialZoom: 12.0, 
                     minZoom: 3, 
                   ),

@@ -512,4 +512,4 @@ class _HomePageState extends State<HomePage> {
   Widget _buildNavItem(int index, IconData activeIcon, IconData inactiveIcon) { bool isSelected = _selectedIndex == index; return GestureDetector(onTap: () => setState(() => _selectedIndex = index), child: Container(padding: const EdgeInsets.all(10), color: Colors.transparent, child: Icon(isSelected ? activeIcon : inactiveIcon, size: 28, color: isSelected ? _creamyOrange : Colors.grey.shade600))); }
 }
 
-// FORCE UPDATE GITHUB - MODIFICATION
+// VERCEL UPDATE FORCE

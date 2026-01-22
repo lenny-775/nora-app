@@ -186,7 +186,7 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  // --- SÉLECTION / REJOINDRE GROUPE (AVEC AUTO-CRÉATION DES VILLES) ---
+  // --- SÉLECTION / REJOINDRE GROUPE ---
   void _showGroupSelectionSheet() {
     final defaultCities = ['PVTistes Montréal', 'PVTistes Québec', 'PVTistes Toronto', 'PVTistes Vancouver', 'PVTistes Ottawa'];
 
@@ -223,7 +223,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
 
                   Expanded(
                     child: FutureBuilder<List<Map<String, dynamic>>>(
-                      // On charge les groupes publics. S'ils n'existent pas, on pourra les créer ici (logique simplifiée)
                       future: _fetchPublicGroups(defaultCities), 
                       builder: (context, snapshot) {
                         if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: _creamyOrange));
@@ -265,28 +264,17 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  // Fonction utilitaire pour récupérer (et créer si besoin) les groupes par défaut
   Future<List<Map<String, dynamic>>> _fetchPublicGroups(List<String> defaults) async {
-    // 1. Récupérer les groupes publics existants
     final existing = await Supabase.instance.client.from('groups').select().eq('privacy', 'public');
-    
-    // 2. Vérifier s'il manque des villes par défaut (Montréal, etc.)
-    // Note: Pour une vraie prod, on ferait ça via un script admin, mais ici c'est pratique pour tester
     for (String cityName in defaults) {
       if (!existing.any((g) => g['name'] == cityName)) {
         try {
           await Supabase.instance.client.from('groups').insert({
-            'name': cityName,
-            'privacy': 'public',
-            'creator_id': user!.id // Créé par l'utilisateur courant (admin système temporaire)
+            'name': cityName, 'privacy': 'public', 'creator_id': user!.id 
           });
-        } catch (e) {
-          // Ignorer si erreur (déjà créé entre temps)
-        }
+        } catch (e) {}
       }
     }
-    
-    // 3. Re-fetch final
     return await Supabase.instance.client.from('groups').select().eq('privacy', 'public').order('created_at');
   }
 
@@ -295,7 +283,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
     return Scaffold(
       backgroundColor: _backgroundColor,
       
-      // --- APP BAR V3 (LOGO CENTRÉ) ---
       appBar: AppBar(
         backgroundColor: _backgroundColor,
         elevation: 0,
@@ -321,12 +308,11 @@ class _ConversationsPageState extends State<ConversationsPage> {
 
       body: Column(
         children: [
-          // --- SEGMENTED CONTROL ---
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 15),
             padding: const EdgeInsets.all(4),
             height: 50,
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), border: Border.all(color: Colors.black, width: 0.6)), // Bordure fine V3
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), border: Border.all(color: Colors.black, width: 0.6)),
             child: Row(
               children: [
                 _buildSegmentButton(0, "Privé"),
@@ -334,8 +320,6 @@ class _ConversationsPageState extends State<ConversationsPage> {
               ],
             ),
           ),
-
-          // --- LISTE ---
           Expanded(child: _currentTabIndex == 0 ? _buildPrivateChats() : _buildMyGroups()),
         ],
       ),
@@ -360,13 +344,19 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  // --- LISTE PRIVÉE ---
+  // --- LISTE PRIVÉE (CORRIGÉE SANS .neq) ---
   Widget _buildPrivateChats() {
     return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: Supabase.instance.client.from('conversations').stream(primaryKey: ['id']).order('updated_at', ascending: false),
+      stream: Supabase.instance.client
+          .from('conversations')
+          .stream(primaryKey: ['id'])
+          .order('updated_at', ascending: false), // J'ai retiré le .neq qui posait problème
       builder: (context, snapshot) {
         if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: _creamyOrange));
-        final myConversations = snapshot.data!.where((c) => c['user1_id'] == user!.id || c['user2_id'] == user!.id).toList();
+        
+        final myConversations = snapshot.data!.where((c) {
+          return c['user1_id'] == user!.id || c['user2_id'] == user!.id;
+        }).toList();
 
         if (myConversations.isEmpty) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.chat_bubble_outline_rounded, size: 50, color: Colors.grey.shade300), const SizedBox(height: 10), Text("Aucune conversation", style: TextStyle(color: Colors.grey.shade500))]));
 

@@ -5,11 +5,13 @@ import 'dart:ui';
 import 'dart:async'; 
 import '../widgets/nora_logo.dart'; 
 import 'profile_page.dart';
-import 'create_post_page.dart';
+import 'create_post_page.dart'; // ✅ Utilisé pour l'édition
 import 'conversations_page.dart';
 import 'post_details_page.dart';
 import 'welcome_page.dart';
 import 'other_profile_page.dart';
+import 'housing_map_page.dart'; 
+import 'all_housing_map_page.dart'; 
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -27,14 +29,14 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _foundProfiles = []; 
   Timer? _debounce; 
 
-  // --- FILTRES (Listes réintégrées) ---
+  // --- FILTRES ---
   String _currentCityFilter = "Montréal"; 
   String _currentTopicFilter = "Tout";
 
   final List<String> _cities = ['Montréal', 'Québec', 'Toronto', 'Vancouver', 'Ottawa', 'Calgary', 'Edmonton', 'Winnipeg', 'Halifax', 'Victoria'];
   final List<String> _topics = ['Tout', '🏠 Logement', '💼 Emploi', '🍻 Sorties', '🆘 Entraide', '📢 Annonce'];
 
-  // --- VARIABLES "OPTIMISTIC UI" ---
+  // --- OPTIMISTIC UI ---
   final Map<String, bool> _optimisticLikes = {}; 
   final Map<String, int> _optimisticCounts = {};
   
@@ -64,7 +66,6 @@ class _HomePageState extends State<HomePage> {
     try {
       final data = await Supabase.instance.client.from('profiles').select('city').eq('id', user.id).maybeSingle();
       if (mounted && data != null && data['city'] != null) {
-        // On vérifie que la ville de l'utilisateur est bien dans notre liste, sinon on garde la défaut
         if (_cities.contains(data['city'])) {
           setState(() => _currentCityFilter = data['city']);
         }
@@ -90,7 +91,7 @@ class _HomePageState extends State<HomePage> {
     setState(() {}); 
   }
 
-  // --- LIKE INSTANTANÉ ---
+  // --- LIKE ---
   Future<void> _toggleLike(Map<String, dynamic> post) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
@@ -121,34 +122,146 @@ class _HomePageState extends State<HomePage> {
       }
       await Supabase.instance.client.from('posts').update({'liked_by': currentDbLikes}).eq('id', postId);
     } catch (e) {
-      debugPrint("ERREUR LIKE DB: $e");
       setState(() {
         _optimisticLikes.remove(postId);
         _optimisticCounts.remove(postId);
       });
-      if(mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erreur: Impossible de liker.")));
     }
   }
 
-  // --- SAUVEGARDE POST (MODIFIÉ : PLUS DE SNACKBAR) ---
+  // --- FAVORIS ---
   Future<void> _toggleSavePost(int postId) async {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
     try {
       final existing = await Supabase.instance.client.from('saved_posts').select().eq('user_id', user.id).eq('post_id', postId).maybeSingle();
       if (existing == null) {
-        // Ajouter aux favoris
         await Supabase.instance.client.from('saved_posts').insert({'user_id': user.id, 'post_id': postId});
-        // Pas de SnackBar ici
       } else {
-        // Retirer des favoris
         await Supabase.instance.client.from('saved_posts').delete().eq('user_id', user.id).eq('post_id', postId);
-        // Pas de SnackBar ici non plus
       }
-      setState(() {}); // On met à jour l'icône (vide/plein)
-    } catch (e) { 
-      debugPrint("Erreur favoris: $e"); 
+      setState(() {}); 
+    } catch (e) { debugPrint("Erreur favoris: $e"); }
+  }
+
+  // --- 🗑️ SUPPRIMER POST (Silencieux) ---
+  Future<void> _deletePost(int postId) async {
+    try {
+      await Supabase.instance.client.from('posts').delete().eq('id', postId);
+      // Pas de SnackBar, le Stream met à jour l'UI automatiquement
+    } catch (e) {
+      debugPrint("Erreur suppression: $e");
     }
+  }
+
+  // --- ⚙️ MENU OPTIONS (Design V3 - Popup Stylé) ---
+  void _showPostOptions(Map<String, dynamic> post) {
+    final myId = Supabase.instance.client.auth.currentUser?.id;
+    bool isMyPost = post['user_id'] == myId;
+
+    if (!isMyPost) return; 
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent, // Pour avoir des coins arrondis flottants
+      builder: (context) {
+        return Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Barre de drag
+              Container(
+                width: 40, height: 5,
+                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
+              ),
+              const SizedBox(height: 25),
+              
+              // Option Modifier
+              GestureDetector(
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => CreatePostPage(postToEdit: post)));
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 15),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.grey.shade200)
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(color: Colors.blue.shade50, shape: BoxShape.circle),
+                        child: Icon(Icons.edit_rounded, color: Colors.blue.shade700, size: 22),
+                      ),
+                      const SizedBox(width: 15),
+                      Text("Modifier le post", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)),
+                      const Spacer(),
+                      Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey.shade400)
+                    ],
+                  ),
+                ),
+              ),
+              
+              const SizedBox(height: 15),
+
+              // Option Supprimer
+              GestureDetector(
+                onTap: () {
+                  showDialog(
+                    context: context, 
+                    builder: (ctx) => AlertDialog(
+                      title: const Text("Supprimer ?"), 
+                      content: const Text("Cette action est irréversible."),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      actions: [
+                        TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("Annuler", style: TextStyle(color: Colors.grey))),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                          onPressed: (){ 
+                            Navigator.pop(ctx); // Ferme l'alerte
+                            Navigator.pop(context); // Ferme le menu
+                            _deletePost(post['id']); 
+                          }, 
+                          child: const Text("Supprimer", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                        ),
+                      ]
+                    )
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 15),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.red.shade100)
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                        child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 22),
+                      ),
+                      const SizedBox(width: 15),
+                      const Text("Supprimer le post", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 30),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   // --- APP BAR ---
@@ -169,85 +282,60 @@ class _HomePageState extends State<HomePage> {
             tag: 'nora-logo-hero',
             child: Material(
               color: Colors.transparent,
-              child: SizedBox(
-                height: 40, 
-                width: 120, 
-                child: FittedBox(
-                  fit: BoxFit.contain,
-                  child: const NoraLogo(size: 40),
-                ),
-              ),
+              child: SizedBox(height: 40, width: 120, child: FittedBox(fit: BoxFit.contain, child: const NoraLogo(size: 40))),
             ),
           ),
       actions: [
-        if (!_isSearching) 
-          IconButton(icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.black, size: 28), onPressed: () async { await Navigator.push(context, MaterialPageRoute(builder: (context) => const CreatePostPage())); setState(() {}); }),
+        if (!_isSearching) ...[
+          IconButton(
+            icon: const Icon(Icons.map_outlined, color: Colors.black, size: 28),
+            onPressed: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => AllHousingMapPage(city: _currentCityFilter)));
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.black, size: 28), 
+            onPressed: () async { await Navigator.push(context, MaterialPageRoute(builder: (context) => const CreatePostPage())); setState(() {}); }
+          ),
+        ],
         const SizedBox(width: 12),
       ],
     );
   }
 
-  // --- WIDGET FILTRES ---
+  // --- FILTRES ---
   Widget _buildFilterDropdowns() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
         children: [
-          // FILTRE VILLE
           Expanded(
             child: Container(
-              height: 45,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(25),
-                border: Border.all(color: Colors.black, width: 0.6), // Style V3
-              ),
+              height: 45, padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), border: Border.all(color: Colors.black, width: 0.6)),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
-                  value: _cities.contains(_currentCityFilter) ? _currentCityFilter : _cities[0],
-                  isExpanded: true,
+                  value: _cities.contains(_currentCityFilter) ? _currentCityFilter : _cities[0], isExpanded: true,
                   icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.black),
                   style: TextStyle(color: _darkText, fontWeight: FontWeight.bold, fontSize: 14),
-                  items: _cities.map((String city) {
-                    return DropdownMenuItem<String>(
-                      value: city,
-                      child: Text(city, overflow: TextOverflow.ellipsis),
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    if (newValue != null) setState(() => _currentCityFilter = newValue);
-                  },
+                  items: _cities.map((String city) => DropdownMenuItem<String>(value: city, child: Text(city, overflow: TextOverflow.ellipsis))).toList(),
+                  onChanged: (String? newValue) { if (newValue != null) setState(() => _currentCityFilter = newValue); },
                 ),
               ),
             ),
           ),
-          const SizedBox(width: 12), // Séparation
-          // FILTRE THÈME
+          const SizedBox(width: 12), 
           Expanded(
             child: Container(
-              height: 45,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(25),
-                border: Border.all(color: Colors.black, width: 0.6), // Style V3
-              ),
+              height: 45, padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), border: Border.all(color: Colors.black, width: 0.6)),
               child: DropdownButtonHideUnderline(
                 child: DropdownButton<String>(
-                  value: _topics.contains(_currentTopicFilter) ? _currentTopicFilter : _topics[0],
-                  isExpanded: true,
+                  value: _topics.contains(_currentTopicFilter) ? _currentTopicFilter : _topics[0], isExpanded: true,
                   icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.black),
                   style: TextStyle(color: _darkText, fontWeight: FontWeight.bold, fontSize: 14),
-                  items: _topics.map((String topic) {
-                    return DropdownMenuItem<String>(
-                      value: topic,
-                      child: Text(topic, overflow: TextOverflow.ellipsis),
-                    );
-                  }).toList(),
-                  onChanged: (String? newValue) {
-                    if (newValue != null) setState(() => _currentTopicFilter = newValue);
-                  },
+                  items: _topics.map((String topic) => DropdownMenuItem<String>(value: topic, child: Text(topic, overflow: TextOverflow.ellipsis))).toList(),
+                  onChanged: (String? newValue) { if (newValue != null) setState(() => _currentTopicFilter = newValue); },
                 ),
               ),
             ),
@@ -275,12 +363,9 @@ class _HomePageState extends State<HomePage> {
         }).toList();
 
         return ListView(
-          padding: const EdgeInsets.only(bottom: 100), // Padding pour le menu du bas
+          padding: const EdgeInsets.only(bottom: 100),
           children: [
-            // 1. LES FILTRES (Affichés uniquement si on ne cherche pas)
             if (!_isSearching) _buildFilterDropdowns(),
-
-            // 2. RÉSULTATS RECHERCHE (Personnes)
             if (_isSearching && _foundProfiles.isNotEmpty) ...[
               const Padding(padding: EdgeInsets.symmetric(vertical: 10, horizontal: 24), child: Text("Personnes", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
               SizedBox(height: 90, child: ListView.builder(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), itemCount: _foundProfiles.length, itemBuilder: (context, index) {
@@ -289,12 +374,9 @@ class _HomePageState extends State<HomePage> {
               })),
               const Divider(height: 30),
             ],
-
-            // 3. POSTS OU VIDE
             if (posts.isEmpty && _foundProfiles.isEmpty)
               Padding(padding: const EdgeInsets.only(top: 50), child: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.filter_none, size: 50, color: Colors.grey.shade300), const SizedBox(height: 15), Text(_isSearching ? "Aucun résultat." : "Rien pour $_currentTopicFilter à $_currentCityFilter.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade500))]))),
             
-            // 4. LISTE DES POSTS
             ...posts.map((post) {
               return FutureBuilder<List<dynamic>>(
                 future: Future.wait<dynamic>([
@@ -314,7 +396,6 @@ class _HomePageState extends State<HomePage> {
                   String postId = post['id'].toString();
                   List<dynamic> dbLikes = post['liked_by'] ?? [];
                   bool isLikedDb = dbLikes.contains(myId);
-                  
                   bool finalIsLiked = _optimisticLikes[postId] ?? isLikedDb;
                   int finalCount = _optimisticCounts[postId] ?? dbLikes.length;
 
@@ -328,24 +409,75 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // --- POST CARD ---
   Widget _buildV3PostCard(Map<String, dynamic> post, Map<String, dynamic> author, String timeAgo, bool isLiked, int likesCount, int commentsCount, bool isSaved, String? myId) {
-    bool isMyPost = post['user_id'] == myId;
+    bool isMyPost = post['user_id'] == myId; 
+    bool hasLocation = post['category'] == '🏠 Logement' && post['latitude'] != null;
+
     return GestureDetector(
       onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(post: post, userName: author['first_name'], timeAgo: timeAgo))),
       child: Container(
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16), // Padding adapté
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.black, width: 0.6)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
                 GestureDetector(onTap: () => isMyPost ? setState(()=>_selectedIndex=2) : Navigator.push(context, MaterialPageRoute(builder: (context) => OtherProfilePage(userId: post['user_id']))), child: CircleAvatar(radius: 18, backgroundImage: NetworkImage(author['avatar_url'] ?? "https://i.pravatar.cc/150"), backgroundColor: Colors.grey.shade200)),
-                const SizedBox(width: 10), Expanded(child: Text(author['first_name'] ?? "User", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: _darkText))),
-                Text(timeAgo, style: TextStyle(color: Colors.grey.shade500, fontSize: 12)), const SizedBox(width: 10),
-                IconButton(icon: const Icon(Icons.ios_share_rounded, size: 20, color: Colors.black), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: () { final String contentToShare = "${author['first_name']} a posté sur NORA : \n\n\"${post['content']}\"\n\nRejoins la communauté ! 🍁"; Share.share(contentToShare); })
+                const SizedBox(width: 10), 
+                Expanded(child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(author['first_name'] ?? "User", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: _darkText)),
+                    Text(timeAgo, style: TextStyle(color: Colors.grey.shade500, fontSize: 12)), 
+                  ],
+                )),
+                
+                if (isMyPost) ...[
+                  const SizedBox(width: 5),
+                  GestureDetector(
+                    onTap: () => _showPostOptions(post),
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      color: Colors.transparent, 
+                      child: Icon(Icons.more_horiz_rounded, color: Colors.grey.shade600),
+                    ),
+                  )
+                ] else ...[
+                  const SizedBox(width: 10),
+                  IconButton(
+                    icon: const Icon(Icons.ios_share_rounded, size: 20, color: Colors.black), 
+                    padding: EdgeInsets.zero, 
+                    constraints: const BoxConstraints(), 
+                    onPressed: () { 
+                      final String contentToShare = "${author['first_name']} a posté sur NORA : \n\n\"${post['content']}\"\n\nRejoins la communauté ! 🍁"; 
+                      Share.share(contentToShare); 
+                    }
+                  )
+                ]
             ]),
-            const SizedBox(height: 12), Text(post['content'] ?? "", style: TextStyle(fontSize: 15, color: _darkText, height: 1.4)),
+
+            const SizedBox(height: 12), 
+            Text(post['content'] ?? "", style: TextStyle(fontSize: 15, color: _darkText, height: 1.4)),
             const SizedBox(height: 12),
             if (post['image_url'] != null && post['image_url'].toString().isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 12), child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(post['image_url'], width: double.infinity, height: 250, fit: BoxFit.cover, errorBuilder: (context, error, stackTrace) => const SizedBox()))),
+            
+            if (hasLocation)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: GestureDetector(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => HousingMapPage(post: post))),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                    decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blue.shade200)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.map_rounded, color: Colors.blue.shade700, size: 20), const SizedBox(width: 8),
+                        Text("Voir le logement sur la carte", style: TextStyle(color: Colors.blue.shade800, fontWeight: FontWeight.bold, fontSize: 13)), const Spacer(),
+                        Icon(Icons.arrow_forward_ios_rounded, color: Colors.blue.shade300, size: 14),
+                    ]),
+                  ),
+                ),
+              ),
+
             Row(children: [
                 GestureDetector(onTap: () => _toggleLike(post), child: Row(children: [Icon(isLiked ? Icons.favorite : Icons.favorite_border, size: 22, color: isLiked ? Colors.red : Colors.black), const SizedBox(width: 6), Text("$likesCount", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))])),
                 const SizedBox(width: 20), Row(children: [const Icon(Icons.chat_bubble_outline, size: 20, color: Colors.black), const SizedBox(width: 6), Text("$commentsCount", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))]),

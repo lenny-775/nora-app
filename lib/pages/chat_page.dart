@@ -1,6 +1,6 @@
 import 'dart:async';
-import 'dart:io'; // Attention : File ne marche pas sur le Web
-import 'package:flutter/foundation.dart'; // Pour kIsWeb
+import 'dart:io'; 
+import 'package:flutter/foundation.dart'; 
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
@@ -41,6 +41,11 @@ class _ChatPageState extends State<ChatPage> {
   Map<String, dynamic>? _attachedPost;
   String? _receiverAvatarUrl; 
 
+  // --- INDICATEUR DE FRAPPE ---
+  late final RealtimeChannel _typingChannel;
+  bool _isReceiverTyping = false;
+  Timer? _typingTimer;
+
   final Color _creamyOrange = const Color(0xFFFF914D);
   final Color _backgroundColor = const Color(0xFFFFF8F5);
   final Color _darkText = const Color(0xFF2D3436);
@@ -50,18 +55,66 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     _audioRecorder = AudioRecorder();
     if (widget.pendingPost != null) _attachedPost = widget.pendingPost;
+    
     _fetchReceiverProfile();
     _updateMyLastSeen();
     _markMessagesAsRead();
+    _setupTypingIndicator(); // Initialisation du canal temps réel
   }
 
   @override
   void dispose() {
+    _typingTimer?.cancel();
+    Supabase.instance.client.removeChannel(_typingChannel); // Nettoyage du canal
     _controller.dispose();
     _scrollController.dispose();
     _audioRecorder.dispose();
     super.dispose();
   }
+
+  // --- LOGIQUE INDICATEUR DE FRAPPE ---
+  void _setupTypingIndicator() {
+    // On crée un canal unique pour cette conversation
+    _typingChannel = Supabase.instance.client.channel('typing_${widget.conversationId}');
+
+    _typingChannel
+        .onBroadcast(event: 'typing', callback: (payload) {
+          final userId = payload['user_id'];
+          final isTyping = payload['is_typing'];
+          
+          // Si c'est l'autre personne qui tape (pas moi)
+          if (userId == widget.receiverId) {
+            if (mounted) setState(() => _isReceiverTyping = isTyping);
+          }
+        })
+        .subscribe();
+
+    // Écouteur sur le champ texte pour détecter quand JE tape
+    _controller.addListener(_onTextChanged);
+  }
+
+  void _onTextChanged() {
+    // Si le champ n'est pas vide, on envoie "je tape"
+    if (_controller.text.isNotEmpty) {
+      _sendTypingStatus(true);
+      
+      // Debounce : Si on arrête de taper pendant 2 sec, on envoie "j'arrête"
+      _typingTimer?.cancel();
+      _typingTimer = Timer(const Duration(seconds: 2), () => _sendTypingStatus(false));
+    } else {
+      _sendTypingStatus(false);
+    }
+  }
+
+  Future<void> _sendTypingStatus(bool isTyping) async {
+    try {
+      await _typingChannel.sendBroadcastMessage(
+        event: 'typing',
+        payload: {'user_id': _myId, 'is_typing': isTyping},
+      );
+    } catch (_) {}
+  }
+  // -----------------------------
 
   Future<void> _fetchReceiverProfile() async {
     try {
@@ -78,7 +131,6 @@ class _ChatPageState extends State<ChatPage> {
     try { await Supabase.instance.client.from('messages').update({'read_at': DateTime.now().toIso8601String()}).eq('conversation_id', widget.conversationId).neq('sender_id', _myId).filter('read_at', 'is', null); } catch (_) {}
   }
 
-  // --- LIKE ---
   Future<void> _toggleLike(Map<String, dynamic> msg) async {
     try {
       final messageId = msg['id'];
@@ -88,10 +140,13 @@ class _ChatPageState extends State<ChatPage> {
     } catch (e) { debugPrint("Erreur like: $e"); }
   }
 
-  // --- ENVOI GÉNÉRIQUE ---
   Future<void> _sendMessage({String? text, String? imageUrl, String? audioUrl}) async {
     if ((text == null || text.trim().isEmpty) && imageUrl == null && audioUrl == null && _attachedPost == null) return;
     
+    // On arrête d'indiquer qu'on tape dès qu'on envoie
+    _sendTypingStatus(false);
+    _typingTimer?.cancel();
+
     _controller.clear();
     final postToSend = _attachedPost;
     setState(() => _attachedPost = null);
@@ -126,7 +181,6 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // --- UPLOAD IMAGE (CORRIGÉ) ---
   Future<void> _pickAndUploadImage() async {
     try {
       final XFile? image = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 50, maxWidth: 1024);
@@ -136,15 +190,9 @@ class _ChatPageState extends State<ChatPage> {
       final bytes = await image.readAsBytes();
       final fileExt = image.name.split('.').last;
       final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_myId.$fileExt';
-      
-      // CORRECTION : On enlève le dossier 'chat_images/' car on est déjà dedans via .from()
       final path = fileName;
 
-      await Supabase.instance.client.storage.from('chat_images').uploadBinary(
-        path, 
-        bytes, 
-        fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true)
-      );
+      await Supabase.instance.client.storage.from('chat_images').uploadBinary(path, bytes, fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true));
       final imageUrl = Supabase.instance.client.storage.from('chat_images').getPublicUrl(path);
 
       await _sendMessage(imageUrl: imageUrl);
@@ -155,38 +203,26 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // --- AUDIO (SÉCURISÉ POUR LE WEB + CORRIGÉ) ---
   Future<void> _toggleRecording() async {
     if (kIsWeb) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Les vocaux sont disponibles sur l'application mobile 📱")));
       return;
     }
-
     try {
       if (_isRecording) {
-        // STOP
         final String? path = await _audioRecorder.stop();
         setState(() => _isRecording = false);
-
         if (path != null) {
           setState(() => _isUploading = true);
           final File audioFile = File(path);
           final bytes = await audioFile.readAsBytes();
           final fileName = 'audio_${DateTime.now().millisecondsSinceEpoch}_$_myId.m4a';
-          
-          // CORRECTION : On enlève le dossier 'chat_images/' ici aussi
           final storagePath = fileName;
-
-          await Supabase.instance.client.storage.from('chat_images').uploadBinary(
-            storagePath, 
-            bytes, 
-            fileOptions: const FileOptions(contentType: 'audio/m4a', upsert: true)
-          );
+          await Supabase.instance.client.storage.from('chat_images').uploadBinary(storagePath, bytes, fileOptions: const FileOptions(contentType: 'audio/m4a', upsert: true));
           final audioUrl = Supabase.instance.client.storage.from('chat_images').getPublicUrl(storagePath);
           await _sendMessage(audioUrl: audioUrl);
         }
       } else {
-        // START
         if (await _audioRecorder.hasPermission()) {
           final Directory appDir = await getApplicationDocumentsDirectory();
           final String path = '${appDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.m4a';
@@ -196,11 +232,7 @@ class _ChatPageState extends State<ChatPage> {
           await Permission.microphone.request();
         }
       }
-    } catch (e) { 
-      debugPrint("Erreur audio: $e"); 
-    } finally { 
-      if (mounted) setState(() => _isUploading = false); 
-    }
+    } catch (e) { debugPrint("Erreur audio: $e"); } finally { if (mounted) setState(() => _isUploading = false); }
   }
 
   void _scrollDown() {
@@ -230,7 +262,24 @@ class _ChatPageState extends State<ChatPage> {
       appBar: AppBar(
         backgroundColor: _backgroundColor, elevation: 0, centerTitle: true,
         leading: IconButton(icon: Icon(Icons.arrow_back_ios_new_rounded, color: _darkText), onPressed: () => Navigator.pop(context)),
-        title: Column(children: [Text(widget.receiverName, style: TextStyle(color: _darkText, fontWeight: FontWeight.w900, fontSize: 18)), StreamBuilder<List<Map<String, dynamic>>>(stream: Supabase.instance.client.from('profiles').stream(primaryKey: ['id']).eq('id', widget.receiverId), builder: (context, snapshot) { if (!snapshot.hasData || snapshot.data!.isEmpty) return const SizedBox.shrink(); return Text(_formatLastSeen(snapshot.data!.first['last_seen']), style: TextStyle(color: Colors.grey.shade600, fontSize: 12)); })]),
+        title: Column(
+          children: [
+            Text(widget.receiverName, style: TextStyle(color: _darkText, fontWeight: FontWeight.w900, fontSize: 18)), 
+            StreamBuilder<List<Map<String, dynamic>>>(
+              stream: Supabase.instance.client.from('profiles').stream(primaryKey: ['id']).eq('id', widget.receiverId), 
+              builder: (context, snapshot) { 
+                if (!snapshot.hasData || snapshot.data!.isEmpty) return const SizedBox.shrink(); 
+                
+                // Si la personne est en train d'écrire, on affiche ça à la place du "Vu à..."
+                if (_isReceiverTyping) {
+                   return Text("est en train d'écrire...", style: TextStyle(color: _creamyOrange, fontSize: 12, fontWeight: FontWeight.bold, fontStyle: FontStyle.italic));
+                }
+                
+                return Text(_formatLastSeen(snapshot.data!.first['last_seen']), style: TextStyle(color: Colors.grey.shade600, fontSize: 12)); 
+              }
+            )
+          ]
+        ),
       ),
       body: Column(
         children: [
@@ -286,23 +335,9 @@ class _ChatPageState extends State<ChatPage> {
                                         child: Column(
                                           crossAxisAlignment: CrossAxisAlignment.start,
                                           children: [
-                                            // IMAGE
-                                            if (type == 'image') 
-                                              ClipRRect(
-                                                borderRadius: BorderRadius.circular(15), 
-                                                child: Image.network(
-                                                  content, width: 200, fit: BoxFit.cover,
-                                                  errorBuilder: (context, error, stackTrace) => const SizedBox(height: 50, width: 50, child: Icon(Icons.broken_image)),
-                                                )
-                                              ),
-                                            
-                                            // POST
+                                            if (type == 'image') ClipRRect(borderRadius: BorderRadius.circular(15), child: Image.network(content, width: 200, fit: BoxFit.cover, errorBuilder: (context, error, stackTrace) => const SizedBox(height: 50, width: 50, child: Icon(Icons.broken_image)))),
                                             if (postData != null) Container(width: 220, padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(15)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Icon(Icons.share_rounded, size: 14, color: _creamyOrange), const SizedBox(width: 5), const Expanded(child: Text("Post partagé", style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold)))]), const SizedBox(height: 5), Text(postData['content'] ?? "", maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.black87, fontSize: 13))])),
-                                            
-                                            // AUDIO
                                             if (type == 'audio') _AudioPlayerBubble(url: content, isMe: isMe),
-
-                                            // TEXTE
                                             if (type == 'text' && content.isNotEmpty) Text(content, style: TextStyle(color: isMe ? Colors.white : _darkText, fontSize: 16)),
                                           ],
                                         ),
@@ -323,6 +358,18 @@ class _ChatPageState extends State<ChatPage> {
               },
             ),
           ),
+          
+          // INDICATEUR DE FRAPPE (Visuel en bas si tu préfères, sinon c'est dans l'appbar)
+          if (_isReceiverTyping)
+             Padding(
+               padding: const EdgeInsets.only(left: 20, bottom: 5),
+               child: Row(children: [
+                 const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey)), 
+                 const SizedBox(width: 10),
+                 Text("${widget.receiverName} écrit...", style: TextStyle(color: Colors.grey.shade500, fontSize: 12, fontStyle: FontStyle.italic))
+               ]),
+             ),
+
           SafeArea(
             child: Container(
               margin: const EdgeInsets.all(16),
@@ -331,7 +378,6 @@ class _ChatPageState extends State<ChatPage> {
                 children: [
                   if (_attachedPost != null) Container(margin: const EdgeInsets.fromLTRB(16, 16, 16, 0), padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: _creamyOrange.withOpacity(0.1), borderRadius: BorderRadius.circular(20)), child: Row(children: [Icon(Icons.share_rounded, color: _creamyOrange), const SizedBox(width: 12), Expanded(child: Text(_attachedPost!['content'] ?? "Post", maxLines: 1, overflow: TextOverflow.ellipsis)), IconButton(icon: const Icon(Icons.close_rounded, color: Colors.grey), onPressed: () => setState(() => _attachedPost = null))])),
                   Row(children: [
-                     // MICRO
                     IconButton(
                       icon: Container(
                         padding: const EdgeInsets.all(8),
@@ -356,7 +402,6 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
-// WIDGET AUDIO
 class _AudioPlayerBubble extends StatefulWidget {
   final String url;
   final bool isMe;

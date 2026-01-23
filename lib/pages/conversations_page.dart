@@ -1,7 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import '../widgets/nora_logo.dart'; // Import du logo
+import '../widgets/nora_logo.dart'; 
 import 'chat_page.dart';
 import 'community_chat_page.dart';
 import 'search_page.dart';
@@ -17,7 +17,9 @@ class _ConversationsPageState extends State<ConversationsPage> {
   final User? user = Supabase.instance.client.auth.currentUser;
   int _currentTabIndex = 0; // 0 = Privé, 1 = Groupes
 
-  // COULEURS V3
+  // --- NOUVEAU : Liste des conversations épinglées (ID) ---
+  final Set<int> _pinnedConversationIds = {};
+
   final Color _creamyOrange = const Color(0xFFFF914D);
   final Color _darkText = const Color(0xFF2D3436);
   final Color _backgroundColor = const Color(0xFFFFF8F5);
@@ -32,7 +34,44 @@ class _ConversationsPageState extends State<ConversationsPage> {
     return "${date.day}/${date.month}";
   }
 
-  // --- 1. CRÉATION GROUPE ---
+  // --- ACTIONS DU MENU ---
+  void _togglePin(int conversationId) {
+    setState(() {
+      if (_pinnedConversationIds.contains(conversationId)) {
+        _pinnedConversationIds.remove(conversationId);
+      } else {
+        _pinnedConversationIds.add(conversationId);
+      }
+    });
+  }
+
+  Future<void> _deleteConversation(int conversationId) async {
+    // Demander confirmation
+    bool? confirm = await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Supprimer la conversation ?"),
+        content: const Text("Tous les messages seront définitivement effacés."),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Annuler", style: TextStyle(color: Colors.grey))),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text("Supprimer", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+        ],
+      )
+    );
+
+    if (confirm == true) {
+      try {
+        // Supprime tous les messages liés à cet ID de conversation
+        await Supabase.instance.client.from('messages').delete().eq('conversation_id', conversationId);
+        setState(() {}); // Rafraîchir l'UI
+        if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Conversation supprimée.")));
+      } catch (e) {
+        debugPrint("Erreur suppression: $e");
+      }
+    }
+  }
+
+  // --- CRÉATION GROUPE ---
   void _showCreateGroupDialog() {
     final nameController = TextEditingController();
     String selectedPrivacy = 'public';
@@ -344,47 +383,75 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  // --- LISTE PRIVÉE (CORRIGÉE SANS .neq) ---
+  // --- LISTE PRIVÉE ---
   Widget _buildPrivateChats() {
     return StreamBuilder<List<Map<String, dynamic>>>(
       stream: Supabase.instance.client
-          .from('conversations')
+          .from('messages')
           .stream(primaryKey: ['id'])
-          .order('updated_at', ascending: false), // J'ai retiré le .neq qui posait problème
+          .order('created_at', ascending: false),
       builder: (context, snapshot) {
         if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: _creamyOrange));
         
-        final myConversations = snapshot.data!.where((c) {
-          return c['user1_id'] == user!.id || c['user2_id'] == user!.id;
-        }).toList();
+        final allMessages = snapshot.data!;
+        final Map<String, Map<String, dynamic>> distinctChats = {};
 
-        if (myConversations.isEmpty) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.chat_bubble_outline_rounded, size: 50, color: Colors.grey.shade300), const SizedBox(height: 10), Text("Aucune conversation", style: TextStyle(color: Colors.grey.shade500))]));
+        for (var msg in allMessages) {
+          final isMe = msg['sender_id'] == user!.id;
+          final otherId = isMe ? msg['receiver_id'] : msg['sender_id'];
+          
+          if (otherId != null) {
+            if (!distinctChats.containsKey(otherId)) {
+              distinctChats[otherId] = msg;
+            }
+          }
+        }
+
+        // On transforme en liste et on trie : Épinglés d'abord, puis par date
+        final conversations = distinctChats.values.toList();
+        conversations.sort((a, b) {
+          final int idA = a['conversation_id'] ?? 0;
+          final int idB = b['conversation_id'] ?? 0;
+          final bool isPinnedA = _pinnedConversationIds.contains(idA);
+          final bool isPinnedB = _pinnedConversationIds.contains(idB);
+
+          if (isPinnedA && !isPinnedB) return -1; // A monte
+          if (!isPinnedA && isPinnedB) return 1;  // B monte
+          return 0; // Sinon on laisse l'ordre chrono déjà fait par le stream
+        });
+
+        if (conversations.isEmpty) return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.chat_bubble_outline_rounded, size: 50, color: Colors.grey.shade300), const SizedBox(height: 10), Text("Aucune conversation", style: TextStyle(color: Colors.grey.shade500))]));
 
         return ListView.builder(
           padding: const EdgeInsets.only(top: 5, bottom: 80),
-          itemCount: myConversations.length,
+          itemCount: conversations.length,
           itemBuilder: (context, index) {
-            final conversation = myConversations[index];
-            final otherUserId = (conversation['user1_id'] == user!.id) ? conversation['user2_id'] : conversation['user1_id'];
+            final msg = conversations[index];
+            final bool isMe = msg['sender_id'] == user!.id;
+            final otherUserId = isMe ? msg['receiver_id'] : msg['sender_id'];
+            final bool isUnread = !isMe && msg['read_at'] == null;
+            final int conversationId = msg['conversation_id'] ?? 0;
+            final bool isPinned = _pinnedConversationIds.contains(conversationId);
 
-            return FutureBuilder<List<dynamic>>(
-              future: Future.wait<dynamic>([
-                Supabase.instance.client.from('profiles').select().eq('id', otherUserId).single(),
-                Supabase.instance.client.from('messages').select('id, read_at').eq('conversation_id', conversation['id']).eq('sender_id', otherUserId)
-              ]),
+            return FutureBuilder<Map<String, dynamic>?>(
+              future: Supabase.instance.client.from('profiles').select().eq('id', otherUserId).maybeSingle(),
               builder: (context, snap) {
-                if (!snap.hasData) return const SizedBox.shrink();
-                final profile = snap.data![0] as Map<String, dynamic>;
-                final messages = snap.data![1] as List<dynamic>;
-                final unreadCount = messages.where((m) => m['read_at'] == null).length;
-
+                final profile = snap.data ?? {'first_name': 'Utilisateur', 'avatar_url': null}; 
+                
                 return _buildTile(
+                  conversationId: conversationId,
                   title: profile['first_name'] ?? 'Utilisateur',
-                  subtitle: conversation['last_message'] ?? '...',
+                  subtitle: isMe ? "Vous: ${msg['content']}" : msg['content'],
                   img: profile['avatar_url'],
-                  time: conversation['updated_at'] != null ? _formatTime(conversation['updated_at']) : '',
-                  unread: unreadCount,
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ChatPage(conversationId: conversation['id'], receiverId: otherUserId, receiverName: profile['first_name']))),
+                  time: _formatTime(msg['created_at']),
+                  unread: isUnread ? 1 : 0, 
+                  isPinned: isPinned,
+                  
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => ChatPage(
+                    conversationId: conversationId,
+                    receiverId: otherUserId, 
+                    receiverName: profile['first_name']
+                  ))),
                 );
               },
             );
@@ -422,24 +489,97 @@ class _ConversationsPageState extends State<ConversationsPage> {
     );
   }
 
-  Widget _buildTile({required String title, required String subtitle, String? img, String? time, int unread = 0, bool isGroup = false, required VoidCallback onTap}) {
+  // --- TUILE DE DISCUSSION (AVEC MENU OPTION) ---
+  Widget _buildTile({
+    required String title, 
+    required String subtitle, 
+    String? img, 
+    String? time, 
+    int unread = 0, 
+    bool isGroup = false, 
+    bool isPinned = false,
+    int? conversationId, // Nécessaire pour épingler/supprimer
+    required VoidCallback onTap
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8), 
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.black, width: 0.6)), // Bordure V3
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), // Ajusté pour le menu
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.black, width: 0.6)), 
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 26, 
-              backgroundColor: isGroup ? Colors.orange.shade50 : Colors.grey.shade200,
-              backgroundImage: img != null ? NetworkImage(img) : null, 
-              child: img == null ? Icon(isGroup ? Icons.groups_rounded : Icons.person_rounded, color: isGroup ? _creamyOrange : Colors.grey) : null
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 26, 
+                  backgroundColor: isGroup ? Colors.orange.shade50 : Colors.grey.shade200,
+                  backgroundImage: img != null ? NetworkImage(img) : null, 
+                  child: img == null ? Icon(isGroup ? Icons.groups_rounded : Icons.person_rounded, color: isGroup ? _creamyOrange : Colors.grey) : null
+                ),
+                if (isPinned)
+                  Positioned(bottom: 0, right: 0, child: Container(padding: const EdgeInsets.all(4), decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: Icon(Icons.push_pin_rounded, size: 14, color: _creamyOrange)))
+              ],
             ),
             const SizedBox(width: 15),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(title, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: _darkText)), const SizedBox(height: 4), Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: unread > 0 ? _darkText : Colors.grey.shade500, fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal))])),
-            Column(crossAxisAlignment: CrossAxisAlignment.end, children: [if (time != null && time.isNotEmpty) Text(time, style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontWeight: FontWeight.bold)), if (unread > 0) ...[const SizedBox(height: 6), Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: _creamyOrange, borderRadius: BorderRadius.circular(10)), child: Text('$unread', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)))]]),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start, 
+                children: [
+                  Text(title, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: _darkText)), 
+                  const SizedBox(height: 4), 
+                  Text(subtitle, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: unread > 0 ? _darkText : Colors.grey.shade500, fontWeight: unread > 0 ? FontWeight.w600 : FontWeight.normal))
+                ]
+              )
+            ),
+            
+            // BLOC DE DROITE : Heure + Menu 3 points
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end, 
+                  children: [
+                    if (time != null && time.isNotEmpty) Text(time, style: TextStyle(fontSize: 11, color: Colors.grey.shade400, fontWeight: FontWeight.bold)), 
+                    if (unread > 0) ...[
+                      const SizedBox(height: 6), 
+                      Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4), decoration: BoxDecoration(color: _creamyOrange, borderRadius: BorderRadius.circular(10)), child: Text('$unread', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)))
+                    ]
+                  ]
+                ),
+                if (!isGroup && conversationId != null) // Pas de menu pour les groupes pour l'instant
+                  Padding(
+                    padding: const EdgeInsets.only(left: 5),
+                    child: PopupMenuButton<String>(
+                      icon: Icon(Icons.more_vert_rounded, color: Colors.grey.shade400, size: 20),
+                      padding: EdgeInsets.zero,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                      onSelected: (value) {
+                        if (value == 'pin') _togglePin(conversationId);
+                        if (value == 'delete') _deleteConversation(conversationId);
+                      },
+                      itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                        PopupMenuItem<String>(
+                          value: 'pin',
+                          child: Row(children: [
+                            Icon(isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded, color: _darkText, size: 20),
+                            const SizedBox(width: 12),
+                            Text(isPinned ? 'Détacher' : 'Épingler', style: TextStyle(color: _darkText, fontWeight: FontWeight.bold))
+                          ]),
+                        ),
+                        PopupMenuItem<String>(
+                          value: 'delete',
+                          child: Row(children: [
+                            const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                            const SizedBox(width: 12),
+                            const Text('Supprimer', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold))
+                          ]),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
           ],
         ),
       ),

@@ -4,14 +4,15 @@ import 'package:share_plus/share_plus.dart';
 import 'dart:ui'; 
 import 'dart:async'; 
 import '../widgets/nora_logo.dart'; 
-import 'profile_page.dart';
-import 'create_post_page.dart'; // ✅ Utilisé pour l'édition
+import 'profile_page.dart'; 
+import 'create_post_page.dart';
 import 'conversations_page.dart';
 import 'post_details_page.dart';
 import 'welcome_page.dart';
 import 'other_profile_page.dart';
 import 'housing_map_page.dart'; 
-import 'all_housing_map_page.dart'; 
+import 'all_housing_map_page.dart';
+import 'chat_page.dart'; 
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -29,9 +30,12 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _foundProfiles = []; 
   Timer? _debounce; 
 
-  // --- FILTRES ---
+  // --- FILTRES & BLOCAGE ---
   String _currentCityFilter = "Montréal"; 
   String _currentTopicFilter = "Tout";
+  
+  // ✅ Liste des IDs bloqués pour filtrer le feed
+  List<String> _blockedUserIds = [];
 
   final List<String> _cities = ['Montréal', 'Québec', 'Toronto', 'Vancouver', 'Ottawa', 'Calgary', 'Edmonton', 'Winnipeg', 'Halifax', 'Victoria'];
   final List<String> _topics = ['Tout', '🏠 Logement', '💼 Emploi', '🍻 Sorties', '🆘 Entraide', '📢 Annonce'];
@@ -39,6 +43,9 @@ class _HomePageState extends State<HomePage> {
   // --- OPTIMISTIC UI ---
   final Map<String, bool> _optimisticLikes = {}; 
   final Map<String, int> _optimisticCounts = {};
+  
+  // --- REALTIME ---
+  late final RealtimeChannel _globalChannel;
   
   // --- PALETTE ---
   final Color _creamyOrange = const Color(0xFFFF914D);
@@ -49,12 +56,36 @@ class _HomePageState extends State<HomePage> {
   void initState() {
     super.initState();
     _checkAuthAndLoadProfile();
+    _loadBlockedUsers(); // ✅ On charge les blocages
+    _setupRealtimeListeners();
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
+    Supabase.instance.client.removeChannel(_globalChannel);
     super.dispose();
+  }
+
+  // ✅ Charger la liste des utilisateurs bloqués
+  Future<void> _loadBlockedUsers() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+
+    try {
+      final response = await Supabase.instance.client
+          .from('blocked_users')
+          .select('blocked_id')
+          .eq('blocker_id', user.id);
+      
+      if (mounted) {
+        setState(() {
+          _blockedUserIds = List<String>.from(response.map((e) => e['blocked_id']));
+        });
+      }
+    } catch (e) {
+      debugPrint("Erreur chargement blocages: $e");
+    }
   }
 
   Future<void> _checkAuthAndLoadProfile() async {
@@ -73,6 +104,92 @@ class _HomePageState extends State<HomePage> {
     } catch (e) {
       debugPrint("Erreur profil: $e");
     }
+  }
+
+  void _setupRealtimeListeners() {
+    final myId = Supabase.instance.client.auth.currentUser?.id;
+    if (myId == null) return;
+
+    _globalChannel = Supabase.instance.client.channel('global_notifications');
+
+    _globalChannel.onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'messages',
+      filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'receiver_id', value: myId),
+      callback: (payload) async {
+        final senderId = payload.newRecord['sender_id'];
+        
+        // ✅ Si l'expéditeur est bloqué, on ignore la notif
+        if (_blockedUserIds.contains(senderId)) return;
+
+        final content = payload.newRecord['content'] ?? 'Nouveau message';
+        final senderProfile = await Supabase.instance.client.from('profiles').select('first_name').eq('id', senderId).single();
+        final senderName = senderProfile['first_name'] ?? 'Quelqu\'un';
+
+        if (mounted) {
+          _showInAppBanner(
+            icon: Icons.chat_bubble_rounded,
+            title: senderName,
+            message: content,
+            color: Colors.blueAccent,
+            onTap: () {
+              Navigator.push(context, MaterialPageRoute(builder: (context) => ChatPage(conversationId: payload.newRecord['conversation_id'] ?? 0, receiverId: senderId, receiverName: senderName)));
+            }
+          );
+        }
+      }
+    );
+
+    _globalChannel.onPostgresChanges(
+      event: PostgresChangeEvent.insert,
+      schema: 'public',
+      table: 'notifications',
+      filter: PostgresChangeFilter(type: PostgresChangeFilterType.eq, column: 'user_id', value: myId),
+      callback: (payload) async {
+        final actorId = payload.newRecord['actor_id'];
+        
+        // ✅ Si l'acteur est bloqué, on ignore la notif
+        if (_blockedUserIds.contains(actorId)) return;
+
+        final type = payload.newRecord['type'];
+        final actorProfile = await Supabase.instance.client.from('profiles').select('first_name').eq('id', actorId).single();
+        final actorName = actorProfile['first_name'] ?? 'Quelqu\'un';
+        
+        String text = type == 'like' ? "a aimé ton post ❤️" : "a commenté ton post 💬";
+
+        if (mounted) {
+          _showInAppBanner(
+            icon: type == 'like' ? Icons.favorite_rounded : Icons.comment_rounded,
+            title: actorName,
+            message: text,
+            color: _creamyOrange,
+            onTap: () => setState(() => _selectedIndex = 2)
+          );
+        }
+      }
+    ).subscribe();
+  }
+
+  void _showInAppBanner({required IconData icon, required String title, required String message, required Color color, required VoidCallback onTap}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: GestureDetector(
+          onTap: () { ScaffoldMessenger.of(context).hideCurrentSnackBar(); onTap(); },
+          child: Row(children: [
+              Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle), child: Icon(icon, color: Colors.white, size: 20)),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)), Text(message, style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)]))
+          ]),
+        ),
+        backgroundColor: color.withOpacity(0.95),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+        margin: EdgeInsets.only(bottom: MediaQuery.of(context).size.height - 140, left: 15, right: 15),
+        duration: const Duration(seconds: 4),
+        elevation: 10,
+      ),
+    );
   }
 
   // --- RECHERCHE ---
@@ -118,7 +235,10 @@ class _HomePageState extends State<HomePage> {
         currentDbLikes.remove(user.id); 
         if (!currentlyLiked) currentDbLikes.add(user.id); 
       } else {
-        currentDbLikes.add(user.id); 
+        currentDbLikes.add(user.id);
+        if (post['user_id'] != user.id) {
+          try { await Supabase.instance.client.from('notifications').insert({'user_id': post['user_id'], 'actor_id': user.id, 'post_id': post['id'], 'type': 'like'}); } catch (_) {}
+        }
       }
       await Supabase.instance.client.from('posts').update({'liked_by': currentDbLikes}).eq('id', postId);
     } catch (e) {
@@ -129,142 +249,45 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // --- FAVORIS ---
-  Future<void> _toggleSavePost(int postId) async {
+  Future<void> _toggleSavePost(dynamic postId) async { 
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return;
     try {
       final existing = await Supabase.instance.client.from('saved_posts').select().eq('user_id', user.id).eq('post_id', postId).maybeSingle();
-      if (existing == null) {
-        await Supabase.instance.client.from('saved_posts').insert({'user_id': user.id, 'post_id': postId});
-      } else {
-        await Supabase.instance.client.from('saved_posts').delete().eq('user_id', user.id).eq('post_id', postId);
-      }
+      if (existing == null) await Supabase.instance.client.from('saved_posts').insert({'user_id': user.id, 'post_id': postId});
+      else await Supabase.instance.client.from('saved_posts').delete().eq('user_id', user.id).eq('post_id', postId);
       setState(() {}); 
     } catch (e) { debugPrint("Erreur favoris: $e"); }
   }
 
-  // --- 🗑️ SUPPRIMER POST (Silencieux) ---
-  Future<void> _deletePost(int postId) async {
-    try {
-      await Supabase.instance.client.from('posts').delete().eq('id', postId);
-      // Pas de SnackBar, le Stream met à jour l'UI automatiquement
-    } catch (e) {
-      debugPrint("Erreur suppression: $e");
-    }
+  Future<void> _deletePost(dynamic postId) async { 
+    try { await Supabase.instance.client.from('posts').delete().eq('id', postId); } catch (e) { debugPrint("Erreur suppression: $e"); }
   }
 
-  // --- ⚙️ MENU OPTIONS (Design V3 - Popup Stylé) ---
   void _showPostOptions(Map<String, dynamic> post) {
     final myId = Supabase.instance.client.auth.currentUser?.id;
     bool isMyPost = post['user_id'] == myId;
-
     if (!isMyPost) return; 
 
     showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent, // Pour avoir des coins arrondis flottants
+      context: context, backgroundColor: Colors.transparent, 
       builder: (context) {
         return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-          ),
+          decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Barre de drag
-              Container(
-                width: 40, height: 5,
-                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10)),
-              ),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
               const SizedBox(height: 25),
-              
-              // Option Modifier
-              GestureDetector(
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (context) => CreatePostPage(postToEdit: post)));
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 15),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.grey.shade200)
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: Colors.blue.shade50, shape: BoxShape.circle),
-                        child: Icon(Icons.edit_rounded, color: Colors.blue.shade700, size: 22),
-                      ),
-                      const SizedBox(width: 15),
-                      Text("Modifier le post", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)),
-                      const Spacer(),
-                      Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey.shade400)
-                    ],
-                  ),
-                ),
-              ),
-              
+              GestureDetector(onTap: () { Navigator.pop(context); Navigator.push(context, MaterialPageRoute(builder: (context) => CreatePostPage(postToEdit: post))); }, child: Container(padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 15), decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.grey.shade200)), child: Row(children: [Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.blue.shade50, shape: BoxShape.circle), child: Icon(Icons.edit_rounded, color: Colors.blue.shade700, size: 22)), const SizedBox(width: 15), Text("Modifier le post", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _darkText)), const Spacer(), Icon(Icons.arrow_forward_ios_rounded, size: 16, color: Colors.grey.shade400)]))),
               const SizedBox(height: 15),
-
-              // Option Supprimer
-              GestureDetector(
-                onTap: () {
-                  showDialog(
-                    context: context, 
-                    builder: (ctx) => AlertDialog(
-                      title: const Text("Supprimer ?"), 
-                      content: const Text("Cette action est irréversible."),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      actions: [
-                        TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("Annuler", style: TextStyle(color: Colors.grey))),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                          onPressed: (){ 
-                            Navigator.pop(ctx); // Ferme l'alerte
-                            Navigator.pop(context); // Ferme le menu
-                            _deletePost(post['id']); 
-                          }, 
-                          child: const Text("Supprimer", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
-                        ),
-                      ]
-                    )
-                  );
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 15),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.red.shade100)
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                        child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 22),
-                      ),
-                      const SizedBox(width: 15),
-                      const Text("Supprimer le post", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red)),
-                    ],
-                  ),
-                ),
-              ),
+              GestureDetector(onTap: () { showDialog(context: context, builder: (ctx) => AlertDialog(title: const Text("Supprimer ?"), content: const Text("Cette action est irréversible."), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)), actions: [TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("Annuler", style: TextStyle(color: Colors.grey))), ElevatedButton(style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))), onPressed: (){ Navigator.pop(ctx); Navigator.pop(context); _deletePost(post['id']); }, child: const Text("Supprimer", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))])); }, child: Container(padding: const EdgeInsets.symmetric(vertical: 15, horizontal: 15), decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.red.shade100)), child: Row(children: [Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: Colors.white, shape: BoxShape.circle), child: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 22)), const SizedBox(width: 15), const Text("Supprimer le post", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red))]))),
               const SizedBox(height: 30),
-            ],
-          ),
+          ]),
         );
       },
     );
   }
 
-  // --- APP BAR ---
   PreferredSizeWidget _buildAppBar() {
     if (_selectedIndex != 0) return AppBar(toolbarHeight: 0, elevation: 0, backgroundColor: _backgroundColor);
     return AppBar(
@@ -273,75 +296,26 @@ class _HomePageState extends State<HomePage> {
         ? IconButton(icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.black, size: 20), onPressed: () => setState(() { _isSearching = false; _searchController.clear(); _foundProfiles = []; }))
         : IconButton(icon: const Icon(Icons.search_rounded, color: Colors.black, size: 28), onPressed: () => setState(() => _isSearching = true)),
       title: _isSearching
-        ? TextField(
-            controller: _searchController, autofocus: true, style: TextStyle(color: _darkText, fontSize: 18), cursorColor: _creamyOrange,
-            decoration: InputDecoration(hintText: "Chercher...", hintStyle: TextStyle(color: Colors.grey.shade400), border: InputBorder.none),
-            onChanged: _onSearchChanged,
-          )
-        : Hero(
-            tag: 'nora-logo-hero',
-            child: Material(
-              color: Colors.transparent,
-              child: SizedBox(height: 40, width: 120, child: FittedBox(fit: BoxFit.contain, child: const NoraLogo(size: 40))),
-            ),
-          ),
+        ? TextField(controller: _searchController, autofocus: true, style: TextStyle(color: _darkText, fontSize: 18), cursorColor: _creamyOrange, decoration: InputDecoration(hintText: "Chercher...", hintStyle: TextStyle(color: Colors.grey.shade400), border: InputBorder.none), onChanged: _onSearchChanged)
+        : Hero(tag: 'nora-logo-hero', child: Material(color: Colors.transparent, child: SizedBox(height: 40, width: 120, child: FittedBox(fit: BoxFit.contain, child: const NoraLogo(size: 40))))),
       actions: [
         if (!_isSearching) ...[
-          IconButton(
-            icon: const Icon(Icons.map_outlined, color: Colors.black, size: 28),
-            onPressed: () {
-              Navigator.push(context, MaterialPageRoute(builder: (context) => AllHousingMapPage(city: _currentCityFilter)));
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.black, size: 28), 
-            onPressed: () async { await Navigator.push(context, MaterialPageRoute(builder: (context) => const CreatePostPage())); setState(() {}); }
-          ),
+          IconButton(icon: const Icon(Icons.map_outlined, color: Colors.black, size: 28), onPressed: () { Navigator.push(context, MaterialPageRoute(builder: (context) => AllHousingMapPage(city: _currentCityFilter))); }),
+          IconButton(icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.black, size: 28), onPressed: () async { await Navigator.push(context, MaterialPageRoute(builder: (context) => const CreatePostPage())); setState(() {}); }),
         ],
         const SizedBox(width: 12),
       ],
     );
   }
 
-  // --- FILTRES ---
   Widget _buildFilterDropdowns() {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        children: [
-          Expanded(
-            child: Container(
-              height: 45, padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), border: Border.all(color: Colors.black, width: 0.6)),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _cities.contains(_currentCityFilter) ? _currentCityFilter : _cities[0], isExpanded: true,
-                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.black),
-                  style: TextStyle(color: _darkText, fontWeight: FontWeight.bold, fontSize: 14),
-                  items: _cities.map((String city) => DropdownMenuItem<String>(value: city, child: Text(city, overflow: TextOverflow.ellipsis))).toList(),
-                  onChanged: (String? newValue) { if (newValue != null) setState(() => _currentCityFilter = newValue); },
-                ),
-              ),
-            ),
-          ),
+      child: Row(children: [
+          Expanded(child: Container(height: 45, padding: const EdgeInsets.symmetric(horizontal: 12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), border: Border.all(color: Colors.black, width: 0.6)), child: DropdownButtonHideUnderline(child: DropdownButton<String>(value: _cities.contains(_currentCityFilter) ? _currentCityFilter : _cities[0], isExpanded: true, icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.black), style: TextStyle(color: _darkText, fontWeight: FontWeight.bold, fontSize: 14), items: _cities.map((String city) => DropdownMenuItem<String>(value: city, child: Text(city, overflow: TextOverflow.ellipsis))).toList(), onChanged: (String? newValue) { if (newValue != null) setState(() => _currentCityFilter = newValue); })))),
           const SizedBox(width: 12), 
-          Expanded(
-            child: Container(
-              height: 45, padding: const EdgeInsets.symmetric(horizontal: 12),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), border: Border.all(color: Colors.black, width: 0.6)),
-              child: DropdownButtonHideUnderline(
-                child: DropdownButton<String>(
-                  value: _topics.contains(_currentTopicFilter) ? _currentTopicFilter : _topics[0], isExpanded: true,
-                  icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.black),
-                  style: TextStyle(color: _darkText, fontWeight: FontWeight.bold, fontSize: 14),
-                  items: _topics.map((String topic) => DropdownMenuItem<String>(value: topic, child: Text(topic, overflow: TextOverflow.ellipsis))).toList(),
-                  onChanged: (String? newValue) { if (newValue != null) setState(() => _currentTopicFilter = newValue); },
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
+          Expanded(child: Container(height: 45, padding: const EdgeInsets.symmetric(horizontal: 12), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), border: Border.all(color: Colors.black, width: 0.6)), child: DropdownButtonHideUnderline(child: DropdownButton<String>(value: _topics.contains(_currentTopicFilter) ? _currentTopicFilter : _topics[0], isExpanded: true, icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.black), style: TextStyle(color: _darkText, fontWeight: FontWeight.bold, fontSize: 14), items: _topics.map((String topic) => DropdownMenuItem<String>(value: topic, child: Text(topic, overflow: TextOverflow.ellipsis))).toList(), onChanged: (String? newValue) { if (newValue != null) setState(() => _currentTopicFilter = newValue); })))),
+      ]),
     );
   }
 
@@ -355,6 +329,9 @@ class _HomePageState extends State<HomePage> {
         
         final allPosts = snapshot.data!;
         final posts = allPosts.where((p) {
+          // ✅ FILTRE BLOCAGE ICI : Si l'auteur est bloqué, on ne montre pas le post
+          if (_blockedUserIds.contains(p['user_id'])) return false;
+
           final matchCity = (p['city'] ?? '') == _currentCityFilter;
           final matchTopic = _currentTopicFilter == 'Tout' || (p['category'] ?? '') == _currentTopicFilter;
           bool matchSearch = true;
@@ -370,6 +347,8 @@ class _HomePageState extends State<HomePage> {
               const Padding(padding: EdgeInsets.symmetric(vertical: 10, horizontal: 24), child: Text("Personnes", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))),
               SizedBox(height: 90, child: ListView.builder(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), itemCount: _foundProfiles.length, itemBuilder: (context, index) {
                 final profile = _foundProfiles[index];
+                // On ne montre pas les profils bloqués dans la recherche non plus
+                if (_blockedUserIds.contains(profile['id'])) return const SizedBox();
                 return GestureDetector(onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => OtherProfilePage(userId: profile['id']))), child: Container(width: 70, margin: const EdgeInsets.only(right: 15), child: Column(children: [CircleAvatar(radius: 28, backgroundImage: NetworkImage(profile['avatar_url'] ?? "https://i.pravatar.cc/150")), const SizedBox(height: 5), Text(profile['first_name'] ?? "User", overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600))])));
               })),
               const Divider(height: 30),
@@ -424,65 +403,15 @@ class _HomePageState extends State<HomePage> {
             Row(children: [
                 GestureDetector(onTap: () => isMyPost ? setState(()=>_selectedIndex=2) : Navigator.push(context, MaterialPageRoute(builder: (context) => OtherProfilePage(userId: post['user_id']))), child: CircleAvatar(radius: 18, backgroundImage: NetworkImage(author['avatar_url'] ?? "https://i.pravatar.cc/150"), backgroundColor: Colors.grey.shade200)),
                 const SizedBox(width: 10), 
-                Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(author['first_name'] ?? "User", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: _darkText)),
-                    Text(timeAgo, style: TextStyle(color: Colors.grey.shade500, fontSize: 12)), 
-                  ],
-                )),
-                
-                if (isMyPost) ...[
-                  const SizedBox(width: 5),
-                  GestureDetector(
-                    onTap: () => _showPostOptions(post),
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      color: Colors.transparent, 
-                      child: Icon(Icons.more_horiz_rounded, color: Colors.grey.shade600),
-                    ),
-                  )
-                ] else ...[
-                  const SizedBox(width: 10),
-                  IconButton(
-                    icon: const Icon(Icons.ios_share_rounded, size: 20, color: Colors.black), 
-                    padding: EdgeInsets.zero, 
-                    constraints: const BoxConstraints(), 
-                    onPressed: () { 
-                      final String contentToShare = "${author['first_name']} a posté sur NORA : \n\n\"${post['content']}\"\n\nRejoins la communauté ! 🍁"; 
-                      Share.share(contentToShare); 
-                    }
-                  )
-                ]
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(author['first_name'] ?? "User", style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15, color: _darkText)), Text(timeAgo, style: TextStyle(color: Colors.grey.shade500, fontSize: 12))])),
+                if (isMyPost) ...[const SizedBox(width: 5), GestureDetector(onTap: () => _showPostOptions(post), child: Container(padding: const EdgeInsets.all(8), color: Colors.transparent, child: Icon(Icons.more_horiz_rounded, color: Colors.grey.shade600)))] else ...[const SizedBox(width: 10), IconButton(icon: const Icon(Icons.ios_share_rounded, size: 20, color: Colors.black), padding: EdgeInsets.zero, constraints: const BoxConstraints(), onPressed: () { Share.share("${author['first_name']} a posté sur NORA : \n\n\"${post['content']}\""); })]
             ]),
-
             const SizedBox(height: 12), 
             Text(post['content'] ?? "", style: TextStyle(fontSize: 15, color: _darkText, height: 1.4)),
             const SizedBox(height: 12),
             if (post['image_url'] != null && post['image_url'].toString().isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 12), child: ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(post['image_url'], width: double.infinity, height: 250, fit: BoxFit.cover, errorBuilder: (context, error, stackTrace) => const SizedBox()))),
-            
-            if (hasLocation)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: GestureDetector(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => HousingMapPage(post: post))),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-                    decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blue.shade200)),
-                    child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(Icons.map_rounded, color: Colors.blue.shade700, size: 20), const SizedBox(width: 8),
-                        Text("Voir le logement sur la carte", style: TextStyle(color: Colors.blue.shade800, fontWeight: FontWeight.bold, fontSize: 13)), const Spacer(),
-                        Icon(Icons.arrow_forward_ios_rounded, color: Colors.blue.shade300, size: 14),
-                    ]),
-                  ),
-                ),
-              ),
-
-            Row(children: [
-                GestureDetector(onTap: () => _toggleLike(post), child: Row(children: [Icon(isLiked ? Icons.favorite : Icons.favorite_border, size: 22, color: isLiked ? Colors.red : Colors.black), const SizedBox(width: 6), Text("$likesCount", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))])),
-                const SizedBox(width: 20), Row(children: [const Icon(Icons.chat_bubble_outline, size: 20, color: Colors.black), const SizedBox(width: 6), Text("$commentsCount", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))]),
-                const Spacer(), GestureDetector(onTap: () => _toggleSavePost(post['id']), child: Icon(isSaved ? Icons.bookmark : Icons.bookmark_border, size: 24, color: isSaved ? _creamyOrange : Colors.black)),
-            ])
+            if (hasLocation) Padding(padding: const EdgeInsets.only(bottom: 12), child: GestureDetector(onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => HousingMapPage(post: post))), child: Container(padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12), decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blue.shade200)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.map_rounded, color: Colors.blue.shade700, size: 20), const SizedBox(width: 8), Text("Voir le logement sur la carte", style: TextStyle(color: Colors.blue.shade800, fontWeight: FontWeight.bold, fontSize: 13)), const Spacer(), Icon(Icons.arrow_forward_ios_rounded, color: Colors.blue.shade300, size: 14)])))),
+            Row(children: [GestureDetector(onTap: () => _toggleLike(post), child: Row(children: [Icon(isLiked ? Icons.favorite : Icons.favorite_border, size: 22, color: isLiked ? Colors.red : Colors.black), const SizedBox(width: 6), Text("$likesCount", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))])), const SizedBox(width: 20), Row(children: [const Icon(Icons.chat_bubble_outline, size: 20, color: Colors.black), const SizedBox(width: 6), Text("$commentsCount", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))]), const Spacer(), GestureDetector(onTap: () => _toggleSavePost(post['id']), child: Icon(isSaved ? Icons.bookmark : Icons.bookmark_border, size: 24, color: isSaved ? _creamyOrange : Colors.black))])
         ]),
       ),
     );
@@ -493,7 +422,11 @@ class _HomePageState extends State<HomePage> {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return const Icon(Icons.chat_bubble_outline_rounded, size: 26);
     return StreamBuilder<List<Map<String, dynamic>>>(stream: Supabase.instance.client.from('messages').stream(primaryKey: ['id']), builder: (context, snapshot) {
-        int unreadCount = 0; if (snapshot.hasData) unreadCount = snapshot.data!.where((m) => m['read_at'] == null && m['sender_id'] != user.id).length;
+        int unreadCount = 0; if (snapshot.hasData) {
+          final unreadMessages = snapshot.data!.where((m) => m['read_at'] == null && m['receiver_id'] == user.id).toList();
+          final uniqueConversations = unreadMessages.map((m) => m['conversation_id']).toSet();
+          unreadCount = uniqueConversations.length;
+        }
         IconData icon = _selectedIndex == 1 ? Icons.chat_bubble_rounded : Icons.chat_bubble_outline_rounded;
         Color color = _selectedIndex == 1 ? _creamyOrange : Colors.grey.shade600;
         if (unreadCount == 0) return Icon(icon, color: color, size: 26);
@@ -505,11 +438,10 @@ class _HomePageState extends State<HomePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _backgroundColor, extendBody: true, appBar: _buildAppBar(),
-      body: IndexedStack(index: _selectedIndex, children: [ _buildFeed(), const ConversationsPage(), const ProfilePage() ]),
+      // ✅ J'ai retiré le "const" ici pour éviter l'erreur
+      body: IndexedStack(index: _selectedIndex, children: [ _buildFeed(), const ConversationsPage(), ProfilePage() ]),
       bottomNavigationBar: Container(margin: const EdgeInsets.only(left: 24, right: 24, bottom: 34), height: 70, child: ClipRRect(borderRadius: BorderRadius.circular(40), child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), child: Container(decoration: BoxDecoration(color: Colors.white.withOpacity(0.75), border: Border.all(color: Colors.white.withOpacity(0.2)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, 5))]), child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [_buildNavItem(0, Icons.home_rounded, Icons.home_outlined), GestureDetector(onTap: () => setState(() => _selectedIndex = 1), child: Container(width: 50, height: 50, color: Colors.transparent, child: Center(child: _buildChatIconWithBadge()))), _buildNavItem(2, Icons.person_rounded, Icons.person_outline_rounded)]))))),
     );
   }
   Widget _buildNavItem(int index, IconData activeIcon, IconData inactiveIcon) { bool isSelected = _selectedIndex == index; return GestureDetector(onTap: () => setState(() => _selectedIndex = index), child: Container(padding: const EdgeInsets.all(10), color: Colors.transparent, child: Icon(isSelected ? activeIcon : inactiveIcon, size: 28, color: isSelected ? _creamyOrange : Colors.grey.shade600))); }
 }
-
-// VERCEL UPDATE FORCE

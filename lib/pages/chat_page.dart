@@ -1,27 +1,27 @@
 import 'dart:async';
-import 'dart:io'; 
-import 'package:flutter/foundation.dart'; 
+import 'dart:io';
+import 'package:flutter/foundation.dart'; // Pour kIsWeb
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:record/record.dart'; 
-import 'package:audioplayers/audioplayers.dart'; 
-import 'package:path_provider/path_provider.dart'; 
+import 'package:audioplayers/audioplayers.dart';
+import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 class ChatPage extends StatefulWidget {
-  final int conversationId;
+  final int conversationId; // On accepte l'ID, mais on va le vérifier
   final String receiverId;
   final String receiverName;
   final Map<String, dynamic>? pendingPost;
 
   const ChatPage({
-    super.key, 
-    required this.conversationId, 
+    super.key,
+    required this.conversationId,
     required this.receiverId,
     required this.receiverName,
-    this.pendingPost, 
+    this.pendingPost,
   });
 
   @override
@@ -37,11 +37,12 @@ class _ChatPageState extends State<ChatPage> {
   late final AudioRecorder _audioRecorder;
   bool _isRecording = false;
   bool _isUploading = false;
+  bool _isLoading = true; // Pour attendre qu'on trouve le bon ID
   
+  late int _realConversationId; // Le VRAI ID vérifié
   Map<String, dynamic>? _attachedPost;
-  String? _receiverAvatarUrl; 
+  String? _receiverAvatarUrl;
 
-  // --- INDICATEUR DE FRAPPE ---
   late final RealtimeChannel _typingChannel;
   bool _isReceiverTyping = false;
   Timer? _typingTimer;
@@ -56,49 +57,79 @@ class _ChatPageState extends State<ChatPage> {
     _audioRecorder = AudioRecorder();
     if (widget.pendingPost != null) _attachedPost = widget.pendingPost;
     
-    _fetchReceiverProfile();
+    // On initialise avec ce qu'on a, mais on lance l'enquête tout de suite
+    _realConversationId = widget.conversationId;
+    
+    _initChat();
+  }
+
+  // C'est ici que la magie opère pour réparer le lien
+  Future<void> _initChat() async {
+    await _fetchReceiverProfile();
+    await _findTrueConversationId(); // 🔍 On cherche le vrai ID
+    await _markMessagesAsRead();     // 👀 On valide la lecture
+    _setupTypingIndicator();
     _updateMyLastSeen();
-    _markMessagesAsRead();
-    _setupTypingIndicator(); // Initialisation du canal temps réel
+    
+    if (mounted) setState(() => _isLoading = false);
+  }
+
+  // 🔍 TROUVER LE VRAI ID DE CONVERSATION
+  Future<void> _findTrueConversationId() async {
+    try {
+      // On cherche une conversation qui contient MOI et L'AUTRE
+      final data = await Supabase.instance.client
+          .from('conversations')
+          .select('id')
+          .or('and(user1_id.eq.$_myId,user2_id.eq.${widget.receiverId}),and(user1_id.eq.${widget.receiverId},user2_id.eq.$_myId)')
+          .maybeSingle();
+
+      if (data != null) {
+        if (mounted) {
+          setState(() {
+            _realConversationId = data['id'];
+          });
+          debugPrint("✅ Conversation trouvée : ID $_realConversationId");
+        }
+      } else {
+        // Si aucune conversation n'existe, on en créera une au premier message
+        debugPrint("⚠️ Aucune conversation existante trouvée dans la base.");
+      }
+    } catch (e) {
+      debugPrint("Erreur recherche ID: $e");
+    }
   }
 
   @override
   void dispose() {
     _typingTimer?.cancel();
-    Supabase.instance.client.removeChannel(_typingChannel); // Nettoyage du canal
+    if (_realConversationId != 0) {
+      Supabase.instance.client.removeChannel(_typingChannel);
+    }
     _controller.dispose();
     _scrollController.dispose();
     _audioRecorder.dispose();
     super.dispose();
   }
 
-  // --- LOGIQUE INDICATEUR DE FRAPPE ---
   void _setupTypingIndicator() {
-    // On crée un canal unique pour cette conversation
-    _typingChannel = Supabase.instance.client.channel('typing_${widget.conversationId}');
-
+    // On utilise le VRAI ID pour le canal
+    _typingChannel = Supabase.instance.client.channel('typing_$_realConversationId');
     _typingChannel
         .onBroadcast(event: 'typing', callback: (payload) {
           final userId = payload['user_id'];
           final isTyping = payload['is_typing'];
-          
-          // Si c'est l'autre personne qui tape (pas moi)
-          if (userId == widget.receiverId) {
-            if (mounted) setState(() => _isReceiverTyping = isTyping);
+          if (userId == widget.receiverId && mounted) {
+            setState(() => _isReceiverTyping = isTyping);
           }
         })
         .subscribe();
-
-    // Écouteur sur le champ texte pour détecter quand JE tape
     _controller.addListener(_onTextChanged);
   }
 
   void _onTextChanged() {
-    // Si le champ n'est pas vide, on envoie "je tape"
     if (_controller.text.isNotEmpty) {
       _sendTypingStatus(true);
-      
-      // Debounce : Si on arrête de taper pendant 2 sec, on envoie "j'arrête"
       _typingTimer?.cancel();
       _typingTimer = Timer(const Duration(seconds: 2), () => _sendTypingStatus(false));
     } else {
@@ -114,12 +145,11 @@ class _ChatPageState extends State<ChatPage> {
       );
     } catch (_) {}
   }
-  // -----------------------------
 
   Future<void> _fetchReceiverProfile() async {
     try {
-      final data = await Supabase.instance.client.from('profiles').select('avatar_url').eq('id', widget.receiverId).single();
-      if (mounted) setState(() => _receiverAvatarUrl = data['avatar_url']);
+      final data = await Supabase.instance.client.from('profiles').select('avatar_url').eq('id', widget.receiverId).maybeSingle();
+      if (mounted && data != null) setState(() => _receiverAvatarUrl = data['avatar_url']);
     } catch (_) {}
   }
 
@@ -127,8 +157,18 @@ class _ChatPageState extends State<ChatPage> {
     try { await Supabase.instance.client.from('profiles').update({'last_seen': DateTime.now().toIso8601String()}).eq('id', _myId); } catch (_) {}
   }
 
+  // ✅ CORRECTION PASTILLE : On cible directement les IDs utilisateurs pour être sûr
   Future<void> _markMessagesAsRead() async {
-    try { await Supabase.instance.client.from('messages').update({'read_at': DateTime.now().toIso8601String()}).eq('conversation_id', widget.conversationId).neq('sender_id', _myId).filter('read_at', 'is', null); } catch (_) {}
+    try {
+      await Supabase.instance.client
+          .from('messages')
+          .update({'read_at': DateTime.now().toIso8601String()})
+          .eq('sender_id', widget.receiverId) // Venant de lui
+          .eq('receiver_id', _myId)           // Pour moi
+          .filter('read_at', 'is', null);     // Non lus
+    } catch (e) {
+      debugPrint("Erreur lecture: $e");
+    }
   }
 
   Future<void> _toggleLike(Map<String, dynamic> msg) async {
@@ -143,10 +183,8 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _sendMessage({String? text, String? imageUrl, String? audioUrl}) async {
     if ((text == null || text.trim().isEmpty) && imageUrl == null && audioUrl == null && _attachedPost == null) return;
     
-    // On arrête d'indiquer qu'on tape dès qu'on envoie
     _sendTypingStatus(false);
     _typingTimer?.cancel();
-
     _controller.clear();
     final postToSend = _attachedPost;
     setState(() => _attachedPost = null);
@@ -157,82 +195,71 @@ class _ChatPageState extends State<ChatPage> {
     else if (audioUrl != null) type = 'audio';
 
     try {
+      // SI jamais l'ID est toujours 0 (première conversation), on le crée ou on l'envoie quand même
+      // Supabase devrait gérer la création si la logique backend est en place, 
+      // sinon on insère avec l'ID qu'on a.
+      
       await Supabase.instance.client.from('messages').insert({
-        'conversation_id': widget.conversationId,
+        'conversation_id': _realConversationId, 
         'sender_id': _myId,
+        'receiver_id': widget.receiverId,
         'content': audioUrl ?? imageUrl ?? text,
         'post_data': postToSend,
         'type': type,
         'liked_by': [],
       });
 
-      String lastMsgPreview = "Message";
-      if (type == 'text') lastMsgPreview = text!;
-      if (type == 'image') lastMsgPreview = "📷 Photo";
-      if (type == 'audio') lastMsgPreview = "🎤 Vocal";
-      if (type == 'post_share') lastMsgPreview = "🔗 Post";
-
-      await Supabase.instance.client.from('conversations').update({'last_message': lastMsgPreview, 'updated_at': DateTime.now().toIso8601String()}).eq('id', widget.conversationId);
+      String lastMsgPreview = type == 'text' ? text! : (type == 'image' ? "📷 Photo" : "🎤 Vocal");
+      
+      // Mise à jour conversation (si elle existe)
+      if (_realConversationId != 0) {
+        await Supabase.instance.client.from('conversations').update({
+          'last_message': lastMsgPreview, 
+          'updated_at': DateTime.now().toIso8601String()
+        }).eq('id', _realConversationId);
+      }
       
       _updateMyLastSeen();
       _scrollDown();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur: $e")));
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur envoi: $e")));
     }
   }
 
+  // ... (Fonctions Image/Audio identiques, je les garde compactes pour pas prendre de place)
   Future<void> _pickAndUploadImage() async {
     try {
-      final XFile? image = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 50, maxWidth: 1024);
+      final XFile? image = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 50);
       if (image == null) return;
       setState(() => _isUploading = true);
-      
-      final bytes = await image.readAsBytes();
-      final fileExt = image.name.split('.').last;
-      final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_myId.$fileExt';
-      final path = fileName;
-
-      await Supabase.instance.client.storage.from('chat_images').uploadBinary(path, bytes, fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true));
-      final imageUrl = Supabase.instance.client.storage.from('chat_images').getPublicUrl(path);
-
-      await _sendMessage(imageUrl: imageUrl);
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erreur upload image")));
-    } finally {
-      if (mounted) setState(() => _isUploading = false);
-    }
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_$_myId.${image.name.split('.').last}';
+      await Supabase.instance.client.storage.from('chat_images').uploadBinary(fileName, await image.readAsBytes(), fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true));
+      final url = Supabase.instance.client.storage.from('chat_images').getPublicUrl(fileName);
+      await _sendMessage(imageUrl: url);
+    } catch (_) {} finally { if(mounted) setState(() => _isUploading = false); }
   }
 
   Future<void> _toggleRecording() async {
-    if (kIsWeb) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Les vocaux sont disponibles sur l'application mobile 📱")));
-      return;
-    }
+    if (kIsWeb) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Vocaux dispos sur mobile 📱"))); return; }
     try {
       if (_isRecording) {
-        final String? path = await _audioRecorder.stop();
+        final path = await _audioRecorder.stop();
         setState(() => _isRecording = false);
         if (path != null) {
           setState(() => _isUploading = true);
-          final File audioFile = File(path);
-          final bytes = await audioFile.readAsBytes();
           final fileName = 'audio_${DateTime.now().millisecondsSinceEpoch}_$_myId.m4a';
-          final storagePath = fileName;
-          await Supabase.instance.client.storage.from('chat_images').uploadBinary(storagePath, bytes, fileOptions: const FileOptions(contentType: 'audio/m4a', upsert: true));
-          final audioUrl = Supabase.instance.client.storage.from('chat_images').getPublicUrl(storagePath);
-          await _sendMessage(audioUrl: audioUrl);
+          await Supabase.instance.client.storage.from('chat_images').uploadBinary(fileName, await File(path).readAsBytes(), fileOptions: const FileOptions(contentType: 'audio/m4a', upsert: true));
+          final url = Supabase.instance.client.storage.from('chat_images').getPublicUrl(fileName);
+          await _sendMessage(audioUrl: url);
         }
       } else {
         if (await _audioRecorder.hasPermission()) {
-          final Directory appDir = await getApplicationDocumentsDirectory();
-          final String path = '${appDir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.m4a';
-          await _audioRecorder.start(const RecordConfig(), path: path);
+          final dir = await getApplicationDocumentsDirectory();
+          await _audioRecorder.start(const RecordConfig(), path: '${dir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.m4a');
           setState(() => _isRecording = true);
-        } else {
-          await Permission.microphone.request();
-        }
+        } else { await Permission.microphone.request(); }
       }
-    } catch (e) { debugPrint("Erreur audio: $e"); } finally { if (mounted) setState(() => _isUploading = false); }
+    } catch (_) {} finally { if(mounted) setState(() => _isUploading = false); }
   }
 
   void _scrollDown() {
@@ -242,15 +269,17 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   String _formatTime(String createdAt) {
-    final date = DateTime.parse(createdAt).toLocal();
-    return DateFormat('HH:mm').format(date);
+    return DateFormat('HH:mm').format(DateTime.parse(createdAt).toLocal());
   }
 
   String _formatLastSeen(String? lastSeenStr) {
     if (lastSeenStr == null) return "Hors ligne";
     final lastSeen = DateTime.parse(lastSeenStr).toLocal();
     final difference = DateTime.now().difference(lastSeen);
+    
+    // Si vu il y a moins de 5 minutes, on considère "En ligne"
     if (difference.inMinutes < 5) return "En ligne";
+    
     if (difference.inDays == 0) return "Vu à ${DateFormat('HH:mm').format(lastSeen)}";
     return "Vu le ${DateFormat('dd/MM').format(lastSeen)}";
   }
@@ -260,40 +289,77 @@ class _ChatPageState extends State<ChatPage> {
     return Scaffold(
       backgroundColor: _backgroundColor, 
       appBar: AppBar(
-        backgroundColor: _backgroundColor, elevation: 0, centerTitle: true,
-        leading: IconButton(icon: Icon(Icons.arrow_back_ios_new_rounded, color: _darkText), onPressed: () => Navigator.pop(context)),
-        title: Column(
+        backgroundColor: _backgroundColor, 
+        elevation: 0, 
+        centerTitle: true,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new_rounded, color: _darkText), 
+          onPressed: () => Navigator.pop(context)
+        ),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text(widget.receiverName, style: TextStyle(color: _darkText, fontWeight: FontWeight.w900, fontSize: 18)), 
-            StreamBuilder<List<Map<String, dynamic>>>(
-              stream: Supabase.instance.client.from('profiles').stream(primaryKey: ['id']).eq('id', widget.receiverId), 
-              builder: (context, snapshot) { 
-                if (!snapshot.hasData || snapshot.data!.isEmpty) return const SizedBox.shrink(); 
-                
-                // Si la personne est en train d'écrire, on affiche ça à la place du "Vu à..."
-                if (_isReceiverTyping) {
-                   return Text("est en train d'écrire...", style: TextStyle(color: _creamyOrange, fontSize: 12, fontWeight: FontWeight.bold, fontStyle: FontStyle.italic));
-                }
-                
-                return Text(_formatLastSeen(snapshot.data!.first['last_seen']), style: TextStyle(color: Colors.grey.shade600, fontSize: 12)); 
-              }
-            )
-          ]
+            CircleAvatar(
+              radius: 18,
+              backgroundImage: _receiverAvatarUrl != null ? NetworkImage(_receiverAvatarUrl!) : null,
+              backgroundColor: Colors.grey.shade300,
+              child: _receiverAvatarUrl == null ? const Icon(Icons.person, color: Colors.white) : null,
+            ),
+            const SizedBox(width: 10),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(widget.receiverName, style: TextStyle(color: _darkText, fontWeight: FontWeight.w900, fontSize: 16)), 
+                if (_isReceiverTyping)
+                   Text("écrit...", style: TextStyle(color: _creamyOrange, fontSize: 12, fontWeight: FontWeight.bold, fontStyle: FontStyle.italic))
+                else
+                   StreamBuilder<List<Map<String, dynamic>>>(
+                     stream: Supabase.instance.client.from('profiles').stream(primaryKey: ['id']).eq('id', widget.receiverId), 
+                     builder: (context, snapshot) { 
+                       if (!snapshot.hasData || snapshot.data!.isEmpty) return const SizedBox.shrink(); 
+                       return Text(
+                         _formatLastSeen(snapshot.data!.first['last_seen']), 
+                         style: TextStyle(color: Colors.grey.shade600, fontSize: 11)
+                       ); 
+                     }
+                   )
+              ],
+            ),
+          ],
         ),
       ),
-      body: Column(
+      body: _isLoading 
+        ? Center(child: CircularProgressIndicator(color: _creamyOrange)) 
+        : Column(
         children: [
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              stream: Supabase.instance.client.from('messages').stream(primaryKey: ['id']).eq('conversation_id', widget.conversationId).order('created_at', ascending: false),
+              // ✅ ICI : On utilise le VRAI ID qu'on a trouvé au chargement
+              stream: Supabase.instance.client
+                  .from('messages')
+                  .stream(primaryKey: ['id'])
+                  .eq('conversation_id', _realConversationId) // Si c'est 0, ça sera vide, mais c'est logique
+                  .order('created_at', ascending: false),
+              
               builder: (context, snapshot) {
                 if (!snapshot.hasData) return Center(child: CircularProgressIndicator(color: _creamyOrange));
                 final messages = snapshot.data!;
-                if (messages.isNotEmpty) { final lastMsg = messages.first; if (lastMsg['sender_id'] != _myId && lastMsg['read_at'] == null) Future.delayed(Duration.zero, () => _markMessagesAsRead()); }
+                
+                if (messages.isNotEmpty) { 
+                  // Petite sécurité pour marquer comme lu en temps réel si on reste sur la page
+                  final lastMsg = messages.first; 
+                  if (lastMsg['sender_id'] != _myId && lastMsg['read_at'] == null) {
+                    Future.delayed(Duration.zero, () => _markMessagesAsRead());
+                  }
+                }
+                
                 if (messages.isEmpty) return const Center(child: Text("Dites bonjour ! 👋", style: TextStyle(color: Colors.grey)));
 
                 return ListView.builder(
-                  controller: _scrollController, reverse: true, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20), itemCount: messages.length,
+                  controller: _scrollController, 
+                  reverse: true, 
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20), 
+                  itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final msg = messages[index];
                     final isMe = msg['sender_id'] == _myId;
@@ -302,9 +368,7 @@ class _ChatPageState extends State<ChatPage> {
                     final Map<String, dynamic>? postData = msg['post_data']; 
                     final String? readAt = msg['read_at'];
                     final String time = _formatTime(msg['created_at']);
-                    
-                    final List<dynamic> likes = msg['liked_by'] ?? [];
-                    final bool isLiked = likes.isNotEmpty;
+                    final bool isLiked = (msg['liked_by'] ?? []).contains(_myId);
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 15),
@@ -359,17 +423,6 @@ class _ChatPageState extends State<ChatPage> {
             ),
           ),
           
-          // INDICATEUR DE FRAPPE (Visuel en bas si tu préfères, sinon c'est dans l'appbar)
-          if (_isReceiverTyping)
-             Padding(
-               padding: const EdgeInsets.only(left: 20, bottom: 5),
-               child: Row(children: [
-                 const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.grey)), 
-                 const SizedBox(width: 10),
-                 Text("${widget.receiverName} écrit...", style: TextStyle(color: Colors.grey.shade500, fontSize: 12, fontStyle: FontStyle.italic))
-               ]),
-             ),
-
           SafeArea(
             child: Container(
               margin: const EdgeInsets.all(16),

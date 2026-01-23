@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'components.dart'; 
-import 'chat_page.dart';
-import 'post_details_page.dart';
+import 'chat_page.dart'; // Pour le bouton Message
+import 'post_details_page.dart'; // Pour cliquer sur les posts
 
 class OtherProfilePage extends StatefulWidget {
-  final String userId; 
+  final String userId;
 
   const OtherProfilePage({super.key, required this.userId});
 
@@ -14,36 +13,35 @@ class OtherProfilePage extends StatefulWidget {
 }
 
 class _OtherProfilePageState extends State<OtherProfilePage> {
+  final _myId = Supabase.instance.client.auth.currentUser?.id;
   bool _isLoading = true;
-  bool _isMessageLoading = false;
   Map<String, dynamic>? _profileData;
   List<Map<String, dynamic>> _userPosts = [];
 
-  // COULEURS DESIGN SYSTEM
+  // COULEURS
   final Color _creamyOrange = const Color(0xFFFF914D);
-  final Color _darkText = const Color(0xFF2D3436);
   final Color _backgroundColor = const Color(0xFFFFF8F5);
-  final Color _softGrey = const Color(0xFFF4F6F8);
+  final Color _darkText = const Color(0xFF2D3436);
 
   @override
   void initState() {
     super.initState();
-    _fetchUserData();
+    _fetchProfileAndPosts();
   }
 
-  Future<void> _fetchUserData() async {
+  Future<void> _fetchProfileAndPosts() async {
     try {
-      // 1. Profil
+      // 1. Récupérer le profil
       final profile = await Supabase.instance.client
           .from('profiles')
           .select()
           .eq('id', widget.userId)
           .single();
 
-      // 2. Posts
+      // 2. Récupérer les posts
       final posts = await Supabase.instance.client
           .from('posts')
-          .select('*, profiles(first_name, avatar_url)')
+          .select()
           .eq('user_id', widget.userId)
           .order('created_at', ascending: false);
 
@@ -55,280 +53,286 @@ class _OtherProfilePageState extends State<OtherProfilePage> {
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() => _isLoading = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur chargement: $e")));
-      }
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  // --- START CHAT (Rpc) ---
-  Future<void> _startChat() async {
-    setState(() => _isMessageLoading = true);
-    final myId = Supabase.instance.client.auth.currentUser!.id;
-
+  // --- LOGIQUE SIGNALER ---
+  Future<void> _reportUser() async {
+    if (_myId == null) return;
     try {
-      final existingConvId = await Supabase.instance.client.rpc('get_conversation_id', params: {
-        'user1': myId, 
-        'user2': widget.userId
+      await Supabase.instance.client.from('reports').insert({
+        'reporter_id': _myId,
+        'reported_id': widget.userId,
+        'reason': 'Signalement via profil'
       });
-      
-      int conversationId;
-
-      if (existingConvId != null) {
-        conversationId = existingConvId;
-      } else {
-        final newConv = await Supabase.instance.client.from('conversations').insert({}).select().single();
-        conversationId = newConv['id'];
-        await Supabase.instance.client.from('conversation_participants').insert([
-          {'conversation_id': conversationId, 'user_id': myId},
-          {'conversation_id': conversationId, 'user_id': widget.userId}
-        ]);
-      }
-
       if (mounted) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => ChatPage(
-            conversationId: conversationId,
-            receiverId: widget.userId,
-            receiverName: _profileData?['first_name'] ?? "Utilisateur",
-          )),
+        Navigator.pop(context); // Ferme le popup
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Utilisateur signalé. Merci de votre vigilance."))
         );
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur chat: $e")));
-    } finally {
-      if (mounted) setState(() => _isMessageLoading = false);
+      debugPrint("Erreur report: $e");
     }
   }
 
-  String _formatDate(String dateString) {
-    final date = DateTime.tryParse(dateString) ?? DateTime.now();
-    final diff = DateTime.now().difference(date);
-    if (diff.inMinutes < 60) return "${diff.inMinutes} min";
-    if (diff.inHours < 24) return "${diff.inHours} h";
-    return "${date.day}/${date.month}";
+  // --- LOGIQUE BLOQUER ---
+  Future<void> _blockUser() async {
+    if (_myId == null) return;
+    try {
+      await Supabase.instance.client.from('blocked_users').insert({
+        'blocker_id': _myId,
+        'blocked_id': widget.userId,
+      });
+      if (mounted) {
+        Navigator.pop(context); // Ferme le popup
+        Navigator.pop(context); // Revient à la page précédente (quitte le profil)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Utilisateur bloqué."))
+        );
+      }
+    } catch (e) {
+      // Si déjà bloqué ou erreur
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Erreur ou utilisateur déjà bloqué")));
+    }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    if (_isLoading) {
-      return Scaffold(
-        backgroundColor: _backgroundColor,
-        body: Center(child: CircularProgressIndicator(color: _creamyOrange)),
-      );
-    }
-
-    if (_profileData == null) {
-      return const Scaffold(body: Center(child: Text("Utilisateur introuvable")));
-    }
-
-    final String firstName = _profileData?['first_name'] ?? "Voyageur";
-    final String? avatarUrl = _profileData?['avatar_url'];
-    final String bio = _profileData?['bio'] ?? "";
-    final String city = _profileData?['city'] ?? "Inconnu";
-    final String status = _profileData?['status'] ?? "PVTiste";
-    
-    List<String> lookingFor = [];
-    if (_profileData?['looking_for'] != null && (_profileData?['looking_for'] as String).isNotEmpty) {
-      lookingFor = (_profileData?['looking_for'] as String).split(', ');
-    }
-
-    return Scaffold(
-      backgroundColor: _backgroundColor,
-      // SafeArea pour éviter l'encoche
-      body: SafeArea(
-        child: Stack(
+  // --- MENU POPUP ---
+  void _showOptionsPopup() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // SCROLL VIEW PRINCIPALE
-            SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(24, 60, 24, 24), // Marge en haut pour le bouton retour
-              physics: const BouncingScrollPhysics(),
-              child: Column(
-                children: [
-                  // --- AVATAR GLOW ---
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      shape: BoxShape.circle,
-                      boxShadow: [BoxShadow(color: _creamyOrange.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 10))]
-                    ),
-                    child: CircleAvatar(
-                      radius: 60,
-                      backgroundColor: Colors.grey.shade200,
-                      backgroundImage: avatarUrl != null ? NetworkImage(avatarUrl) : null,
-                      child: avatarUrl == null ? Icon(Icons.person_rounded, size: 60, color: Colors.grey.shade400) : null,
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 20),
-                  
-                  // --- INFOS ---
-                  Text(firstName, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: _darkText)),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.location_on_rounded, size: 16, color: _creamyOrange),
-                      const SizedBox(width: 4),
-                      Text("$city • $status", style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                  
-                  const SizedBox(height: 24),
-
-                  // --- BOUTON MESSAGE (PILLULE LARGE) ---
-                  SizedBox(
-                    width: 200,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed: _isMessageLoading ? null : _startChat,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _creamyOrange,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-                        shadowColor: _creamyOrange.withOpacity(0.4),
-                      ),
-                      child: _isMessageLoading 
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                        : const Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.chat_bubble_outline_rounded, color: Colors.white),
-                              SizedBox(width: 10),
-                              Text("Message", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                            ],
-                          ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 30),
-
-                  // --- BIO ---
-                  if (bio.isNotEmpty)
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(25),
-                        boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 10, offset: const Offset(0, 5))],
-                      ),
-                      child: Text(bio, style: TextStyle(fontSize: 15, height: 1.5, color: _darkText), textAlign: TextAlign.center),
-                    ),
-
-                  const SizedBox(height: 20),
-
-                  // --- TAGS ---
-                  if (lookingFor.isNotEmpty)
-                    Wrap(
-                      spacing: 10,
-                      runSpacing: 10,
-                      alignment: WrapAlignment.center,
-                      children: lookingFor.map((tag) => Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: _creamyOrange.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        child: Text(tag, style: TextStyle(color: _creamyOrange, fontWeight: FontWeight.w700, fontSize: 13)),
-                      )).toList(),
-                    ),
-
-                  const SizedBox(height: 30),
-                  
-                  // Titre Section Posts
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text("${_userPosts.length} Publications", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: _darkText))
-                  ),
-                  const SizedBox(height: 15),
-
-                  // --- LISTE DES POSTS ---
-                  if (_userPosts.isEmpty)
-                    Center(child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Text("Aucune publication pour l'instant.", style: TextStyle(color: Colors.grey.shade500)),
-                    ))
-                  else
-                    ..._userPosts.map((post) {
-                      final timeAgo = _formatDate(post['created_at']);
-                      return _buildProfilePostCard(post, firstName, timeAgo);
-                    }),
-                ],
-              ),
-            ),
-
-            // BOUTON RETOUR FLOTTANT (En haut à gauche)
-            Positioned(
-              top: 10,
-              left: 20,
-              child: GestureDetector(
-                onTap: () => Navigator.pop(context),
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                    boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 10, offset: const Offset(0, 4))]
-                  ),
-                  child: Icon(Icons.arrow_back_rounded, color: _darkText, size: 24),
+            Container(width: 40, height: 5, decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(10))),
+            const SizedBox(height: 25),
+            
+            // SIGNALER
+            GestureDetector(
+              onTap: _reportUser,
+              child: Container(
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(20)),
+                child: Row(
+                  children: [
+                    Icon(Icons.flag_rounded, color: _creamyOrange, size: 24),
+                    const SizedBox(width: 15),
+                    Text("Signaler cet utilisateur", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _creamyOrange)),
+                  ],
                 ),
               ),
             ),
+            const SizedBox(height: 15),
+
+            // BLOQUER
+            GestureDetector(
+              onTap: () {
+                // Confirmation avant de bloquer
+                showDialog(
+                  context: context, 
+                  builder: (ctx) => AlertDialog(
+                    title: const Text("Bloquer ?"),
+                    content: const Text("Vous ne verrez plus ses posts et il ne pourra plus vous contacter."),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Annuler", style: TextStyle(color: Colors.grey))),
+                      TextButton(onPressed: () { Navigator.pop(ctx); _blockUser(); }, child: const Text("Bloquer", style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold))),
+                    ],
+                  )
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(20)),
+                child: Row(
+                  children: [
+                    const Icon(Icons.block_rounded, color: Colors.red, size: 24),
+                    const SizedBox(width: 15),
+                    const Text("Bloquer cet utilisateur", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.red)),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 30),
           ],
         ),
       ),
     );
   }
 
-  // --- CARTE POST MODERNE (Identique à ProfilePage) ---
-  Widget _buildProfilePostCard(Map<String, dynamic> post, String userName, String timeAgo) {
-    return GestureDetector(
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(post: post, userName: userName, timeAgo: timeAgo))),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(25),
-          boxShadow: [BoxShadow(color: Colors.grey.shade200, blurRadius: 10, offset: const Offset(0, 4))],
+  @override
+  Widget build(BuildContext context) {
+    if (_isLoading) return Scaffold(backgroundColor: _backgroundColor, body: Center(child: CircularProgressIndicator(color: _creamyOrange)));
+    if (_profileData == null) return const Scaffold(body: Center(child: Text("Profil introuvable")));
+
+    return Scaffold(
+      backgroundColor: _backgroundColor,
+      appBar: AppBar(
+        backgroundColor: _backgroundColor,
+        elevation: 0,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back_ios_new_rounded, color: _darkText),
+          onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          // ✅ LES 3 PETITS POINTS SONT ICI
+          IconButton(
+            icon: Icon(Icons.more_vert_rounded, color: _darkText),
+            onPressed: _showOptionsPopup,
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (post['image_url'] != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(15),
-                  child: Container(
-                    height: 150,
-                    width: double.infinity,
-                    color: Colors.grey.shade100,
-                    child: Image.network(post['image_url'], fit: BoxFit.cover),
-                  ),
+            const SizedBox(height: 10),
+            // AVATAR
+            CircleAvatar(
+              radius: 50,
+              backgroundColor: Colors.grey.shade300,
+              backgroundImage: _profileData!['avatar_url'] != null ? NetworkImage(_profileData!['avatar_url']) : null,
+              child: _profileData!['avatar_url'] == null ? const Icon(Icons.person, size: 50, color: Colors.white) : null,
+            ),
+            const SizedBox(height: 15),
+            
+            // NOM
+            Text(
+              _profileData!['first_name'] ?? "Utilisateur",
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: _darkText),
+            ),
+            
+            // VILLE & TAGS
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_profileData!['city'] != null) ...[
+                  Icon(Icons.location_on, size: 14, color: _creamyOrange),
+                  const SizedBox(width: 4),
+                  Text(_profileData!['city'], style: TextStyle(color: Colors.grey.shade600, fontWeight: FontWeight.bold)),
+                  const SizedBox(width: 10),
+                ],
+                Text("•  ${_profileData!['status'] ?? 'Membre'}", style: TextStyle(color: Colors.grey.shade500)),
+              ],
+            ),
+
+            const SizedBox(height: 20),
+
+            // BOUTON MESSAGE
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 40),
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  // Redirection vers le chat avec cet ID
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => ChatPage(
+                    conversationId: 0, // Le chat page cherchera le bon ID
+                    receiverId: widget.userId,
+                    receiverName: _profileData!['first_name'] ?? "User",
+                  )));
+                },
+                icon: const Icon(Icons.chat_bubble_outline_rounded, color: Colors.white),
+                label: const Text("Message", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _creamyOrange,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25)),
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 30),
+                  elevation: 5,
+                  shadowColor: _creamyOrange.withOpacity(0.4),
                 ),
               ),
-              
-            Text(post['content'], maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 15, height: 1.5, color: _darkText)),
-            const SizedBox(height: 12),
+            ),
+
+            const SizedBox(height: 30),
+
+            // TAGS (Looking For)
+            if (_profileData!['looking_for'] != null)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.center,
+                  children: (_profileData!['looking_for'] as String).split(', ').map((tag) {
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(20)),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.push_pin, size: 14, color: _creamyOrange),
+                          const SizedBox(width: 5),
+                          Text(tag, style: TextStyle(color: Colors.orange.shade800, fontWeight: FontWeight.bold, fontSize: 12)),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+
+            const SizedBox(height: 30),
             
-            Row(
-              children: [
-                Icon(Icons.calendar_today_rounded, size: 14, color: _creamyOrange),
-                const SizedBox(width: 6),
-                Text(timeAgo, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey.shade400)),
-                const Spacer(),
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(color: _softGrey, shape: BoxShape.circle),
-                  child: Icon(Icons.arrow_forward_rounded, size: 14, color: _darkText),
-                )
-              ],
-            )
+            // SECTION PUBLICATIONS
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Text("${_userPosts.length} Publications", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: _darkText)),
+              ),
+            ),
+            const SizedBox(height: 15),
+
+            // LISTE DES POSTS
+            if (_userPosts.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(40.0),
+                child: Center(child: Text("Aucune publication pour le moment.", style: TextStyle(color: Colors.grey.shade400))),
+              )
+            else
+              ListView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(bottom: 40),
+                itemCount: _userPosts.length,
+                itemBuilder: (context, index) {
+                  final post = _userPosts[index];
+                  return GestureDetector(
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => PostDetailsPage(
+                      post: post, 
+                      userName: _profileData!['first_name'], 
+                      timeAgo: "..." // Pas besoin de calculer précis ici
+                    ))),
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.grey.shade100, blurRadius: 5, offset: const Offset(0, 3))]),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(post['content'] ?? "", maxLines: 3, overflow: TextOverflow.ellipsis, style: TextStyle(color: _darkText, fontSize: 14)),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Icon(Icons.calendar_today_rounded, size: 14, color: Colors.grey.shade400),
+                              const SizedBox(width: 5),
+                              Text("Posté récemment", style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+                              const Spacer(),
+                              Icon(Icons.arrow_forward_rounded, size: 16, color: Colors.grey.shade300)
+                            ],
+                          )
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
           ],
         ),
       ),

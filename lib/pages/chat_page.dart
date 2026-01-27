@@ -96,7 +96,6 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   void _setupTypingIndicator() {
-    // Utilisation d'un ID temporaire si pas encore de conv pour éviter crash channel
     final channelId = _realConversationId != 0 ? _realConversationId : 'new_${widget.receiverId}';
     _typingChannel = Supabase.instance.client.channel('typing_$channelId');
     _typingChannel
@@ -163,11 +162,11 @@ class _ChatPageState extends State<ChatPage> {
     } catch (e) { debugPrint("Erreur like: $e"); }
   }
 
-  // --- C'EST ICI QUE LA MAGIE OPÈRE POUR CORRIGER LE BUG ---
+  // --- LE CŒUR DE LA SÉCURITÉ EST ICI ---
   Future<void> _sendMessage({String? text, String? imageUrl, String? audioUrl}) async {
     if ((text == null || text.trim().isEmpty) && imageUrl == null && audioUrl == null && _attachedPost == null) return;
     
-    // 1. Si la conversation n'existe pas encore (ID = 0), on la crée MAINTENANT
+    // 1. Si la conversation n'existe pas (ID=0), on la crée AVANT d'envoyer
     if (_realConversationId == 0) {
       try {
         final newConv = await Supabase.instance.client
@@ -175,23 +174,19 @@ class _ChatPageState extends State<ChatPage> {
             .insert({
               'user1_id': _myId,
               'user2_id': widget.receiverId,
-              'last_message': text ?? "Nouveau message", // Valeur par défaut
+              'last_message': text ?? "Nouveau message",
               'updated_at': DateTime.now().toIso8601String(),
             })
             .select()
             .single();
         
-        setState(() {
-          _realConversationId = newConv['id'];
-        });
-        debugPrint("✅ Conversation créée : $_realConversationId");
+        setState(() => _realConversationId = newConv['id']);
       } catch (e) {
         if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Erreur création chat: $e")));
-        return; // On arrête si on n'a pas pu créer la conv
+        return;
       }
     }
 
-    // 2. Maintenant on est sûr d'avoir un ID valide, on envoie le message
     _sendTypingStatus(false);
     _typingTimer?.cancel();
     _controller.clear();
@@ -204,8 +199,9 @@ class _ChatPageState extends State<ChatPage> {
     else if (audioUrl != null) type = 'audio';
 
     try {
+      // 2. Envoi sécurisé avec tous les IDs obligatoires
       await Supabase.instance.client.from('messages').insert({
-        'conversation_id': _realConversationId, // Ici ce ne sera jamais 0
+        'conversation_id': _realConversationId, 
         'sender_id': _myId,
         'receiver_id': widget.receiverId,
         'content': audioUrl ?? imageUrl ?? text,
@@ -216,7 +212,6 @@ class _ChatPageState extends State<ChatPage> {
 
       String lastMsgPreview = type == 'text' ? text! : (type == 'image' ? "📷 Photo" : "🎤 Vocal");
       
-      // Mise à jour du dernier message
       await Supabase.instance.client.from('conversations').update({
         'last_message': lastMsgPreview, 
         'updated_at': DateTime.now().toIso8601String()
@@ -333,7 +328,6 @@ class _ChatPageState extends State<ChatPage> {
         children: [
           Expanded(
             child: StreamBuilder<List<Map<String, dynamic>>>(
-              // 🔒 VERROU SUPABASE : Uniquement les messages de cette conversation
               stream: Supabase.instance.client
                   .from('messages')
                   .stream(primaryKey: ['id'])
